@@ -21,3 +21,19 @@ players: stocheaza profilurile de CS2(SteamID, nume in game)
 maps: stocheza info despre harti
 matches: inregistreaza detaliile generate ale unui meci(data, scor final, harta jucata - relatie cu tabela maps)
 player_match_stats: tabelul de legatura. asociaza jucatorul cu meciurile si va stoca statisticile
+
+
+Etapa 2 Operații CRUD și Rute API
+Toate cele 6 entitati ale bazei de date dispun de operatii complete CRUD (create, read, update, delete) expuse prin REST API si documentate interactiv in swagger UI (`/docs`):
+
+Roles (`/roles`): `GET` (listare roluri), `POST` (adaugare rol nou), `PUT /{id}` (modificare descriere/nume rol), `DELETE /{id}` (stergere rol).
+
+Users (`/users`): `GET` (listare utilizatori), `POST` (inregistrare utilizator), `PUT /{id}` (actualizare date/rol), `DELETE /{id}` (stergere cont).
+
+Players (`/players`): `GET` (listare jucatori CS2), `POST` (adaugare profil Steam), `PUT /{id}` (actualizare nickname/avatar), `DELETE /{id}` (stergere jucator si statistici asociate in cascada).
+
+Maps (`/maps`): `GET` (listare harti CS2), `POST` (adaugare harta), `PUT /{id}` (modificare status Active Duty), `DELETE /{id}` (stergere harta).
+
+Matches (`/matches`): `GET` (istoric meciuri), `POST` (inregistrare meci nou), `PUT /{id}` (corectare scor CT/T), `DELETE /{id}` (stergere meci).
+
+Player Match Stats (`/stats`): `GET` (listare statistici per meci), `POST` (adaugare Kills/Deaths/ADR pentru un jucator intr-un meci), `PUT /{id}` (actualizare statistici), `DELETE /{id}` (stergere linie statistica).
