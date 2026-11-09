@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2Tracker - Statistici Counter-Strike 2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0b0f19; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .cs-card { background-color: #151c2c; border: 1px solid #232f46; }
+        .cs-accent { color: #f59e0b; }
+        .cs-btn { background-color: #f59e0b; color: #000; font-weight: 700; transition: 0.2s; }
+        .cs-btn:hover { background-color: #d97706; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- NAVBAR -->
+    <nav class="bg-[#111726] border-b border-gray-800 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl font-black tracking-wider text-white">CS2<span class="cs-accent">TRACKER</span></span>
+            <span class="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded border border-amber-500/30">PROIECT BD2</span>
+        </div>
+        <div class="flex space-x-6 text-sm font-semibold">
+            <button onclick="showSection('home')" class="hover:text-amber-400 transition">Home & Search</button>
+            <button onclick="showSection('leaderboard')" class="hover:text-amber-400 transition">Leaderboard</button>
+            <button onclick="showSection('matches')" class="hover:text-amber-400 transition">Meciuri & Harti</button>
+            <button onclick="showSection('admin')" class="hover:text-amber-400 transition">Adauga Date / Admin</button>
+            <a href="/docs" target="_blank" class="text-gray-400 hover:text-white">API Docs ↗</a>
+        </div>
+        <div id="auth-area" class="flex items-center space-x-3">
+            <span id="user-badge" class="text-sm text-gray-400">Neautentificat (Vizitator)</span>
+            <button id="login-btn" onclick="toggleLoginModal()" class="cs-btn px-4 py-1.5 rounded text-sm">Autentificare</button>
+            <button id="logout-btn" onclick="logout()" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm font-bold">Iesire</button>
+        </div>
+    </nav>
+
+    <!-- CONTINUT PRINCIPAL -->
+    <main class="flex-grow container mx-auto px-6 py-8">
+
+        <!-- 1. SECTIUNEA HOME & CAUTARE JUCATOR -->
+        <section id="sec-home" class="space-y-8">
+            <div class="cs-card rounded-xl p-8 text-center bg-gradient-to-b from-[#1a2337] to-[#151c2c]">
+                <h1 class="text-4xl font-extrabold text-white mb-2">Monitorizare Statistici <span class="cs-accent">Counter-Strike 2</span></h1>
+                <p class="text-gray-400 mb-6">Cauta orice jucator dupa Nickname sau SteamID64 pentru a-i analiza performanta K/D, ADR si Headshot %</p>
+                <div class="max-w-xl mx-auto flex gap-2">
+                    <input id="search-input" type="text" oninput="renderPlayers()" placeholder="Cauta jucator (ex: s1mple_ro, ZywOo_fan sau 765611...)" 
+                           class="w-full px-4 py-3 rounded-lg bg-[#0b0f19] border border-gray-700 text-white focus:outline-none focus:border-amber-500">
+                    <button onclick="renderPlayers()" class="cs-btn px-6 py-3 rounded-lg">Cauta</button>
+                </div>
+            </div>
+
+            <!-- Carduri de sumar -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="cs-card p-5 rounded-xl">
+                    <p class="text-gray-400 text-xs uppercase">Jucatori Monitorizati</p>
+                    <p id="stat-players-count" class="text-3xl font-black text-white mt-1">0</p>
+                </div>
+                <div class="cs-card p-5 rounded-xl">
+                    <p class="text-gray-400 text-xs uppercase">Meciuri Inregistrate</p>
+                    <p id="stat-matches-count" class="text-3xl font-black text-white mt-1">0</p>
+                </div>
+                <div class="cs-card p-5 rounded-xl">
+                    <p class="text-gray-400 text-xs uppercase">Harti Active Duty</p>
+                    <p id="stat-maps-count" class="text-3xl font-black text-amber-400 mt-1">0</p>
+                </div>
+                <div class="cs-card p-5 rounded-xl">
+                    <p class="text-gray-400 text-xs uppercase">Rolul Tau Curent</p>
+                    <p id="stat-current-role" class="text-2xl font-black text-emerald-400 mt-1">Vizitator</p>
+                </div>
+            </div>
+
+            <!-- Lista Jucatori (Player Dashboard) -->
+            <div>
+                <h2 class="text-xl font-bold text-white mb-4">Profiluri Jucatori (Player Dashboard)</h2>
+                <div id="players-grid" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
+            </div>
+        </section>
+
+        <!-- 2. SECTIUNEA LEADERBOARD -->
+        <section id="sec-leaderboard" class="hidden space-y-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h2 class="text-2xl font-bold text-white">Clasament Global Jucatori (Leaderboard)</h2>
+                    <p class="text-gray-400 text-sm">Calculat in timp real pe baza statisticilor din meciurile jucate</p>
+                </div>
+            </div>
+            <div class="cs-card rounded-xl overflow-hidden">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-[#0f1523] text-gray-400 text-xs uppercase border-b border-gray-800">
+                            <th class="p-4">Loc</th>
+                            <th class="p-4">Jucator</th>
+                            <th class="p-4">SteamID</th>
+                            <th class="p-4">Kills / Deaths</th>
+                            <th class="p-4">K/D Ratio</th>
+                            <th class="p-4">ADR Mediu</th>
+                            <th class="p-4">Headshot %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboard-body" class="divide-y divide-gray-800 text-sm"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 3. SECTIUNEA MECIURI & HARTI -->
+        <section id="sec-matches" class="hidden space-y-6">
+            <h2 class="text-2xl font-bold text-white">Istoric Meciuri & Harti CS2</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="md:col-span-2 cs-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold mb-4 cs-accent">Meciuri Recente</h3>
+                    <div id="matches-list" class="space-y-3"></div>
+                </div>
+                <div class="cs-card rounded-xl p-6">
+                    <h3 class="text-lg font-bold mb-4 cs-accent">Harti in Baza de Date</h3>
+                    <ul id="maps-list" class="space-y-2 text-sm"></ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. SECTIUNEA ADMIN & OPERATII CRUD -->
+        <section id="sec-admin" class="hidden space-y-6">
+            <div class="cs-card p-6 rounded-xl border-l-4 border-amber-500">
+                <h2 class="text-2xl font-bold text-white">Panou Administrare & Operatii CRUD</h2>
+                <p class="text-gray-400 text-sm mt-1">
+                    Nota: Adaugarea de jucatori/statistici necesita cont <b>Premium</b> sau <b>Admin</b>. Stergerea necesita cont <b>Admin</b>.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Formular Adaugare Jucator -->
+                <div class="cs-card p-6 rounded-xl space-y-4">
+                    <h3 class="text-lg font-bold text-white">1. Adauga Jucator CS2 (POST /players)</h3>
+                    <input id="new-player-steam" type="text" placeholder="SteamID (ex: 76561198000000099)" class="w-full p-2.5 rounded bg-[#0b0f19] border border-gray-700">
+                    <input id="new-player-nick" type="text" placeholder="Nickname in-game (ex: NiKo_CS2)" class="w-full p-2.5 rounded bg-[#0b0f19] border border-gray-700">
+                    <button onclick="addPlayer()" class="cs-btn w-full py-2.5 rounded">Salveaza Jucator</button>
+                </div>
+
+                <!-- Formular Adaugare Statistica Meci -->
+                <div class="cs-card p-6 rounded-xl space-y-3">
+                    <h3 class="text-lg font-bold text-white">2. Adauga Statistica Meci (POST /stats)</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input id="stat-pid" type="number" placeholder="ID Jucator (ex: 1)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                        <input id="stat-mid" type="number" placeholder="ID Meci (ex: 1)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                        <input id="stat-kills" type="number" placeholder="Kills (ex: 25)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                        <input id="stat-deaths" type="number" placeholder="Deaths (ex: 15)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                        <input id="stat-adr" type="number" step="0.1" placeholder="ADR (ex: 92.5)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                        <input id="stat-hs" type="number" step="0.1" placeholder="HS % (ex: 55.0)" class="p-2 rounded bg-[#0b0f19] border border-gray-700">
+                    </div>
+                    <button onclick="addStat()" class="cs-btn w-full py-2.5 rounded">Adauga Statistica</button>
+                </div>
+            </div>
+            <p id="admin-msg" class="text-center font-bold text-sm"></p>
+        </section>
+
+    </main>
+
+    <!-- MODAL AUTENTIFICARE -->
+    <div id="login-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
+        <div class="cs-card p-8 rounded-xl w-full max-w-md space-y-4">
+            <h3 class="text-2xl font-bold text-white">Autentificare Platforma</h3>
+            <p class="text-xs text-gray-400">Conturi predefinite din Fixtures (apasa pe unul pentru completare rapida):</p>
+            <div class="flex gap-2 text-xs">
+                <button onclick="fillLogin('admin_cs2','admin123')" class="bg-red-900/50 border border-red-500 text-red-200 px-2 py-1 rounded">Admin</button>
+                <button onclick="fillLogin('pro_player','premium123')" class="bg-amber-900/50 border border-amber-500 text-amber-200 px-2 py-1 rounded">Premium</button>
+                <button onclick="fillLogin('casual_user','standard123')" class="bg-blue-900/50 border border-blue-500 text-blue-200 px-2 py-1 rounded">Standard</button>
+            </div>
+            <input id="login-user" type="text" placeholder="Username" class="w-full p-3 rounded bg-[#0b0f19] border border-gray-700 text-white">
+            <input id="login-pass" type="password" placeholder="Parola" class="w-full p-3 rounded bg-[#0b0f19] border border-gray-700 text-white">
+            <p id="login-error" class="text-red-400 text-xs"></p>
+            <div class="flex justify-end gap-3 pt-2">
+                <button onclick="toggleLoginModal()" class="px-4 py-2 rounded bg-gray-800 text-gray-300">Anuleaza</button>
+                <button onclick="login()" class="cs-btn px-6 py-2 rounded">Login</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = localStorage.getItem("cs2_token") || null;
+        let currentUser = JSON.parse(localStorage.getItem("cs2_user") || "null");
+        let allPlayers = [], allStats = [], allMatches = [], allMaps = [];
+
+        function showSection(name) {
+            ['home', 'leaderboard', 'matches', 'admin'].forEach(s => {
+                document.getElementById('sec-' + s).classList.add('hidden');
+            });
+            document.getElementById('sec-' + name).classList.remove('hidden');
+        }
+
+        function toggleLoginModal() {
+            document.getElementById('login-modal').classList.toggle('hidden');
+        }
+
+        function fillLogin(u, p) {
+            document.getElementById('login-user').value = u;
+            document.getElementById('login-pass').value = p;
+        }
+
+        async function login() {
+            const u = document.getElementById('login-user').value;
+            const p = document.getElementById('login-pass').value;
+            const formData = new URLSearchParams();
+            formData.append('username', u);
+            formData.append('password', p);
+
+            const res = await fetch('/login', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (!res.ok) {
+                document.getElementById('login-error').innerText = data.detail || "Eroare la autentificare";
+                return;
+            }
+            token = data.access_token;
+            currentUser = { username: data.username, role: data.role };
+            localStorage.setItem("cs2_token", token);
+            localStorage.setItem("cs2_user", JSON.stringify(currentUser));
+            toggleLoginModal();
+            updateAuthUI();
+            loadAllData();
+        }
+
+        function logout() {
+            token = null;
+            currentUser = null;
+            localStorage.removeItem("cs2_token");
+            localStorage.removeItem("cs2_user");
+            updateAuthUI();
+            loadAllData();
+        }
+
+        function updateAuthUI() {
+            const badge = document.getElementById('user-badge');
+            const loginBtn = document.getElementById('login-btn');
+            const logoutBtn = document.getElementById('logout-btn');
+            const roleCard = document.getElementById('stat-current-role');
+
+            if (currentUser) {
+                badge.innerHTML = `Logat ca: <b class="text-white">${currentUser.username}</b> (<span class="cs-accent">${currentUser.role}</span>)`;
+                roleCard.innerText = currentUser.role;
+                loginBtn.classList.add('hidden');
+                logoutBtn.classList.remove('hidden');
+            } else {
+                badge.innerText = "Neautentificat (Vizitator)";
+                roleCard.innerText = "Vizitator";
+                loginBtn.classList.remove('hidden');
+                logoutBtn.classList.add('hidden');
+            }
+        }
+
+        async function loadAllData() {
+            const [pRes, sRes, mRes, mapRes] = await Promise.all([
+                fetch('/players'), fetch('/stats'), fetch('/matches'), fetch('/maps')
+            ]);
+            allPlayers = await pRes.json();
+            allStats = await sRes.json();
+            allMatches = await mRes.json();
+            allMaps = await mapRes.json();
+
+            document.getElementById('stat-players-count').innerText = allPlayers.length;
+            document.getElementById('stat-matches-count').innerText = allMatches.length;
+            document.getElementById('stat-maps-count').innerText = allMaps.length;
+
+            renderPlayers();
+            renderLeaderboard();
+            renderMatchesAndMaps();
+        }
+
+        function getPlayerAggregates(playerId) {
+            const pStats = allStats.filter(s => s.player_id === playerId);
+            if (pStats.length === 0) return { kills: 0, deaths: 0, kd: "0.00", adr: "0.0", hs: "0.0", matches: 0 };
+            const kills = pStats.reduce((a, b) => a + b.kills, 0);
+            const deaths = pStats.reduce((a, b) => a + b.deaths, 0);
+            const kd = deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2);
+            const adr = (pStats.reduce((a, b) => a + b.adr, 0) / pStats.length).toFixed(1);
+            const hs = (pStats.reduce((a, b) => a + b.headshot_percentage, 0) / pStats.length).toFixed(1);
+            return { kills, deaths, kd, adr, hs, matches: pStats.length };
+        }
+
+        function renderPlayers() {
+            const q = document.getElementById('search-input').value.toLowerCase();
+            const grid = document.getElementById('players-grid');
+            grid.innerHTML = "";
+
+            const filtered = allPlayers.filter(p => p.nickname.toLowerCase().includes(q) || p.steam_id.includes(q));
+            filtered.forEach(p => {
+                const agg = getPlayerAggregates(p.id);
+                grid.innerHTML += `
+                    <div class="cs-card rounded-xl p-6 space-y-4 hover:border-amber-500/50 transition">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="text-xl font-bold text-white">${p.nickname}</h3>
+                                <p class="text-xs text-gray-400">SteamID: ${p.steam_id} | ID: #${p.id}</p>
+                            </div>
+                            <span class="bg-amber-500/10 text-amber-400 text-xs px-2.5 py-1 rounded font-bold">K/D: ${agg.kd}</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-center bg-[#0b0f19] p-3 rounded-lg">
+                            <div><p class="text-xs text-gray-400">Kills/Deaths</p><p class="font-bold text-white">${agg.kills}/${agg.deaths}</p></div>
+                            <div><p class="text-xs text-gray-400">ADR</p><p class="font-bold text-amber-400">${agg.adr}</p></div>
+                            <div><p class="text-xs text-gray-400">HS %</p><p class="font-bold text-emerald-400">${agg.hs}%</p></div>
+                        </div>
+                        ${currentUser && currentUser.role === 'Admin' ? `<button onclick="deletePlayer(${p.id})" class="text-xs text-red-400 hover:underline">Sterge jucator (Admin)</button>` : ''}
+                    </div>
+                `;
+            });
+        }
+
+        function renderLeaderboard() {
+            const tbody = document.getElementById('leaderboard-body');
+            tbody.innerHTML = "";
+            const ranked = allPlayers.map(p => ({ ...p, agg: getPlayerAggregates(p.id) }))
+                                     .sort((a, b) => parseFloat(b.agg.kd) - parseFloat(a.agg.kd));
+            ranked.forEach((p, idx) => {
+                tbody.innerHTML += `
+                    <tr class="hover:bg-[#1a2337]">
+                        <td class="p-4 font-black text-amber-400">#${idx + 1}</td>
+                        <td class="p-4 font-bold text-white">${p.nickname}</td>
+                        <td class="p-4 text-gray-400">${p.steam_id}</td>
+                        <td class="p-4">${p.agg.kills} / ${p.agg.deaths}</td>
+                        <td class="p-4 font-bold text-emerald-400">${p.agg.kd}</td>
+                        <td class="p-4">${p.agg.adr}</td>
+                        <td class="p-4">${p.agg.hs}%</td>
+                    </tr>
+                `;
+            });
+        }
+
+        function renderMatchesAndMaps() {
+            const mList = document.getElementById('matches-list');
+            const mapList = document.getElementById('maps-list');
+            mList.innerHTML = "";
+            mapList.innerHTML = "";
+
+            allMatches.forEach(m => {
+                const mapObj = allMaps.find(mp => mp.id === m.map_id);
+                const mapName = mapObj ? mapObj.name : `Map #${m.map_id}`;
+                mList.innerHTML += `
+                    <div class="bg-[#0b0f19] p-4 rounded-lg flex justify-between items-center border border-gray-800">
+                        <div>
+                            <span class="text-xs bg-gray-800 px-2 py-1 rounded text-amber-400 font-bold uppercase">${mapName}</span>
+                            <span class="text-xs text-gray-400 ml-2">Meci ID: #${m.id}</span>
+                        </div>
+                        <div class="text-lg font-black">
+                            <span class="text-blue-400">CT ${m.team_ct_score}</span> : <span class="text-amber-400">${m.team_t_score} T</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            allMaps.forEach(mp => {
+                mapList.innerHTML += `
+                    <li class="bg-[#0b0f19] p-3 rounded flex justify-between border border-gray-800">
+                        <span class="font-bold text-white">${mp.name}</span>
+                        <span class="text-xs text-emerald-400">Active Duty</span>
+                    </li>
+                `;
+            });
+        }
+
+        async function addPlayer() {
+            const steam_id = document.getElementById('new-player-steam').value;
+            const nickname = document.getElementById('new-player-nick').value;
+            const res = await fetch('/players', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ steam_id, nickname, avatar_url: "" })
+            });
+            const data = await res.json();
+            const msg = document.getElementById('admin-msg');
+            if (!res.ok) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = data.detail || "Eroare! Ai nevoie de cont Premium sau Admin.";
+            } else {
+                msg.className = "text-center font-bold text-sm text-emerald-400";
+                msg.innerText = `Jucatorul ${data.nickname} a fost adaugat cu succes!`;
+                loadAllData();
+            }
+        }
+
+        async function addStat() {
+            const payload = {
+                player_id: parseInt(document.getElementById('stat-pid').value),
+                match_id: parseInt(document.getElementById('stat-mid').value),
+                kills: parseInt(document.getElementById('stat-kills').value),
+                deaths: parseInt(document.getElementById('stat-deaths').value),
+                assists: 3,
+                adr: parseFloat(document.getElementById('stat-adr').value),
+                headshot_percentage: parseFloat(document.getElementById('stat-hs').value)
+            };
+            const res = await fetch('/stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            const msg = document.getElementById('admin-msg');
+            if (!res.ok) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = data.detail || "Eroare la adaugare statistica!";
+            } else {
+                msg.className = "text-center font-bold text-sm text-emerald-400";
+                msg.innerText = "Statistica a fost inregistrata in baza de date!";
+                loadAllData();
+            }
+        }
+
+        async function deletePlayer(id) {
+            const res = await fetch(`/players/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) loadAllData();
+            else alert("Doar rolul Admin poate sterge jucatori!");
+        }
+
+        updateAuthUI();
+        loadAllData();
+    </script>
+</body>
+</html>

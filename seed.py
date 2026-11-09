@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from models import Role, User, Player, Map, Match, PlayerMatchStats
+from auth import hash_password
 
 def seed_data(db: Session):
     if db.query(Role).first():
@@ -9,15 +10,15 @@ def seed_data(db: Session):
     print("Se introduc datele de test (Fixtures)...")
 
     role_admin = Role(name="Admin", description="Acces complet la toate operatiile si administrare")
-    role_premium = Role(name="Premium", description="Acces la rapoarte avansate si export PDF/CSV")
+    role_premium = Role(name="Premium", description="Acces la statistici avansate, creare meciuri si export rapoarte")
     role_standard = Role(name="Standard", description="Acces de baza pentru vizualizarea statisticilor")
     db.add_all([role_admin, role_premium, role_standard])
     db.commit()
 
     users = [
-        User(username="admin_cs2", email="admin@cs2tracker.ro", password_hash="hashed_secret_1", role_id=role_admin.id),
-        User(username="pro_player", email="pro@cs2tracker.ro", password_hash="hashed_secret_2", role_id=role_premium.id),
-        User(username="casual_user", email="casual@cs2tracker.ro", password_hash="hashed_secret_3", role_id=role_standard.id),
+        User(username="admin_cs2", email="admin@cs2tracker.ro", password_hash=hash_password("admin123"), role_id=role_admin.id),
+        User(username="pro_player", email="pro@cs2tracker.ro", password_hash=hash_password("premium123"), role_id=role_premium.id),
+        User(username="casual_user", email="casual@cs2tracker.ro", password_hash=hash_password("standard123"), role_id=role_standard.id),
     ]
     db.add_all(users)
 

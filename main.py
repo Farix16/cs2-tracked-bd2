@@ -1,10 +1,19 @@
 from contextlib import asynccontextmanager
 from typing import List
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from fastapi.responses import FileResponse
 
 import models
 import schemas
+from auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    require_roles,
+    verify_password,
+)
 from database import Base, SessionLocal, engine, get_db
 from seed import seed_data
 
@@ -26,14 +35,60 @@ app = FastAPI(
 
 @app.get("/", tags=["General"])
 def read_root():
-    return {"status": "Online", "message": "Baza de date, Fixtures si Operatiile CRUD sunt active!"}
+    return FileResponse("static/index.html")
 
+# 0. AUTENTIFICARE SI VERIFICARE ROL CURENT (ETAPA 3)
 
-# =====================================================================
-# 1. CRUD PENTRU ROLES
-# =====================================================================
+@app.post("/login", tags=["0. Autentificare & Roluri"])
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Username sau parola incorecta"
+        )
+    token = create_access_token(data={"sub": user.username, "role": user.role.name})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "username": user.username,
+        "role": user.role.name
+    }
+
+@app.get("/me", tags=["0. Autentificare & Roluri"])
+def get_my_profile(current_user: models.User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "role": current_user.role.name,
+        "permissions_description": current_user.role.description
+    }
+
+@app.get("/analytics/advanced", tags=["0. Autentificare & Roluri"])
+def get_advanced_analytics(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
+    """Ruta accesibila DOAR pentru rolurile Premium si Admin."""
+    stats = db.query(models.PlayerMatchStats).all()
+    total_kills = sum(s.kills for s in stats)
+    avg_adr = round(sum(s.adr for s in stats) / len(stats), 2) if stats else 0
+    return {
+        "access_level": current_user.role.name,
+        "total_recorded_kills": total_kills,
+        "global_average_adr": avg_adr,
+        "message": "Statistici avansate deblocate pentru conturi Premium/Admin."
+    }
+
+# 1. CRUD PENTRU ROLES (Modificari permise doar pentru Admin)
+
 @app.post("/roles", response_model=schemas.RoleResponse, tags=["1. Roles CRUD"])
-def create_role(role: schemas.RoleCreate, db: Session = Depends(get_db)):
+def create_role(
+    role: schemas.RoleCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     db_role = models.Role(**role.model_dump())
     db.add(db_role)
     db.commit()
@@ -52,7 +107,12 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
     return role
 
 @app.put("/roles/{role_id}", response_model=schemas.RoleResponse, tags=["1. Roles CRUD"])
-def update_role(role_id: int, role_data: schemas.RoleUpdate, db: Session = Depends(get_db)):
+def update_role(
+    role_id: int,
+    role_data: schemas.RoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     role = db.query(models.Role).filter(models.Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Rolul nu a fost gasit")
@@ -63,7 +123,11 @@ def update_role(role_id: int, role_data: schemas.RoleUpdate, db: Session = Depen
     return role
 
 @app.delete("/roles/{role_id}", tags=["1. Roles CRUD"])
-def delete_role(role_id: int, db: Session = Depends(get_db)):
+def delete_role(
+    role_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     role = db.query(models.Role).filter(models.Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Rolul nu a fost gasit")
@@ -71,16 +135,14 @@ def delete_role(role_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"Rolul cu ID {role_id} a fost sters"}
 
+# 2. CRUD PENTRU USERS (Inregistrare publica, stergere doar Admin)
 
-# =====================================================================
-# 2. CRUD PENTRU USERS
-# =====================================================================
 @app.post("/users", response_model=schemas.UserResponse, tags=["2. Users CRUD"])
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = models.User(
         username=user.username,
         email=user.email,
-        password_hash=f"hashed_{user.password}",
+        password_hash=hash_password(user.password),
         role_id=user.role_id
     )
     db.add(db_user)
@@ -89,24 +151,36 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return db_user
 
 @app.get("/users", response_model=List[schemas.UserResponse], tags=["2. Users CRUD"])
-def get_users(db: Session = Depends(get_db)):
+def get_users(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     return db.query(models.User).all()
 
 @app.get("/users/{user_id}", response_model=schemas.UserResponse, tags=["2. Users CRUD"])
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium", "Standard"]))
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilizatorul nu a fost gasit")
     return user
 
 @app.put("/users/{user_id}", response_model=schemas.UserResponse, tags=["2. Users CRUD"])
-def update_user(user_id: int, user_data: schemas.UserUpdate, db: Session = Depends(get_db)):
+def update_user(
+    user_id: int,
+    user_data: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilizatorul nu a fost gasit")
     update_dict = user_data.model_dump(exclude_unset=True)
     if "password" in update_dict:
-        update_dict["password_hash"] = f"hashed_{update_dict.pop('password')}"
+        update_dict["password_hash"] = hash_password(update_dict.pop("password"))
     for key, value in update_dict.items():
         setattr(user, key, value)
     db.commit()
@@ -114,7 +188,11 @@ def update_user(user_id: int, user_data: schemas.UserUpdate, db: Session = Depen
     return user
 
 @app.delete("/users/{user_id}", tags=["2. Users CRUD"])
-def delete_user(user_id: int, db: Session = Depends(get_db)):
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Utilizatorul nu a fost gasit")
@@ -123,11 +201,14 @@ def delete_user(user_id: int, db: Session = Depends(get_db)):
     return {"message": f"Utilizatorul cu ID {user_id} a fost sters"}
 
 
-# =====================================================================
-# 3. CRUD PENTRU PLAYERS
-# =====================================================================
+# 3. CRUD PENTRU PLAYERS (Citire: toti | Creare/Editare: Premium & Admin | Stergere: Admin)
+
 @app.post("/players", response_model=schemas.PlayerResponse, tags=["3. Players CRUD"])
-def create_player(player: schemas.PlayerCreate, db: Session = Depends(get_db)):
+def create_player(
+    player: schemas.PlayerCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     db_player = models.Player(**player.model_dump())
     db.add(db_player)
     db.commit()
@@ -146,7 +227,12 @@ def get_player(player_id: int, db: Session = Depends(get_db)):
     return player
 
 @app.put("/players/{player_id}", response_model=schemas.PlayerResponse, tags=["3. Players CRUD"])
-def update_player(player_id: int, player_data: schemas.PlayerUpdate, db: Session = Depends(get_db)):
+def update_player(
+    player_id: int,
+    player_data: schemas.PlayerUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     player = db.query(models.Player).filter(models.Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Jucatorul nu a fost gasit")
@@ -157,7 +243,11 @@ def update_player(player_id: int, player_data: schemas.PlayerUpdate, db: Session
     return player
 
 @app.delete("/players/{player_id}", tags=["3. Players CRUD"])
-def delete_player(player_id: int, db: Session = Depends(get_db)):
+def delete_player(
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     player = db.query(models.Player).filter(models.Player.id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Jucatorul nu a fost gasit")
@@ -166,11 +256,15 @@ def delete_player(player_id: int, db: Session = Depends(get_db)):
     return {"message": f"Jucatorul cu ID {player_id} a fost sters"}
 
 
-# =====================================================================
-# 4. CRUD PENTRU MAPS
-# =====================================================================
+
+# 4. CRUD PENTRU MAPS (Citire: toti | Modificare/Stergere: Admin)
+
 @app.post("/maps", response_model=schemas.MapResponse, tags=["4. Maps CRUD"])
-def create_map(game_map: schemas.MapCreate, db: Session = Depends(get_db)):
+def create_map(
+    game_map: schemas.MapCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     db_map = models.Map(**game_map.model_dump())
     db.add(db_map)
     db.commit()
@@ -189,7 +283,12 @@ def get_map(map_id: int, db: Session = Depends(get_db)):
     return game_map
 
 @app.put("/maps/{map_id}", response_model=schemas.MapResponse, tags=["4. Maps CRUD"])
-def update_map(map_id: int, map_data: schemas.MapUpdate, db: Session = Depends(get_db)):
+def update_map(
+    map_id: int,
+    map_data: schemas.MapUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     game_map = db.query(models.Map).filter(models.Map.id == map_id).first()
     if not game_map:
         raise HTTPException(status_code=404, detail="Harta nu a fost gasita")
@@ -200,7 +299,11 @@ def update_map(map_id: int, map_data: schemas.MapUpdate, db: Session = Depends(g
     return game_map
 
 @app.delete("/maps/{map_id}", tags=["4. Maps CRUD"])
-def delete_map(map_id: int, db: Session = Depends(get_db)):
+def delete_map(
+    map_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     game_map = db.query(models.Map).filter(models.Map.id == map_id).first()
     if not game_map:
         raise HTTPException(status_code=404, detail="Harta nu a fost gasita")
@@ -209,11 +312,14 @@ def delete_map(map_id: int, db: Session = Depends(get_db)):
     return {"message": f"Harta cu ID {map_id} a fost stearsa"}
 
 
-# =====================================================================
-# 5. CRUD PENTRU MATCHES
-# =====================================================================
+# 5. CRUD PENTRU MATCHES (Citire: toti | Adaugare: Premium & Admin | Stergere: Admin)
+
 @app.post("/matches", response_model=schemas.MatchResponse, tags=["5. Matches CRUD"])
-def create_match(match: schemas.MatchCreate, db: Session = Depends(get_db)):
+def create_match(
+    match: schemas.MatchCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     db_match = models.Match(**match.model_dump())
     db.add(db_match)
     db.commit()
@@ -232,7 +338,12 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
     return match
 
 @app.put("/matches/{match_id}", response_model=schemas.MatchResponse, tags=["5. Matches CRUD"])
-def update_match(match_id: int, match_data: schemas.MatchUpdate, db: Session = Depends(get_db)):
+def update_match(
+    match_id: int,
+    match_data: schemas.MatchUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     match = db.query(models.Match).filter(models.Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Meciul nu a fost gasit")
@@ -243,7 +354,11 @@ def update_match(match_id: int, match_data: schemas.MatchUpdate, db: Session = D
     return match
 
 @app.delete("/matches/{match_id}", tags=["5. Matches CRUD"])
-def delete_match(match_id: int, db: Session = Depends(get_db)):
+def delete_match(
+    match_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     match = db.query(models.Match).filter(models.Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Meciul nu a fost gasit")
@@ -251,12 +366,14 @@ def delete_match(match_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": f"Meciul cu ID {match_id} a fost sters"}
 
-
-# =====================================================================
 # 6. CRUD PENTRU PLAYER_MATCH_STATS
-# =====================================================================
+
 @app.post("/stats", response_model=schemas.PlayerMatchStatsResponse, tags=["6. Player Match Stats CRUD"])
-def create_stats(stats: schemas.PlayerMatchStatsCreate, db: Session = Depends(get_db)):
+def create_stats(
+    stats: schemas.PlayerMatchStatsCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     db_stats = models.PlayerMatchStats(**stats.model_dump())
     db.add(db_stats)
     db.commit()
@@ -275,7 +392,12 @@ def get_stat(stat_id: int, db: Session = Depends(get_db)):
     return stat
 
 @app.put("/stats/{stat_id}", response_model=schemas.PlayerMatchStatsResponse, tags=["6. Player Match Stats CRUD"])
-def update_stat(stat_id: int, stat_data: schemas.PlayerMatchStatsUpdate, db: Session = Depends(get_db)):
+def update_stat(
+    stat_id: int,
+    stat_data: schemas.PlayerMatchStatsUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
     stat = db.query(models.PlayerMatchStats).filter(models.PlayerMatchStats.id == stat_id).first()
     if not stat:
         raise HTTPException(status_code=404, detail="Statistica nu a fost gasita")
@@ -286,7 +408,11 @@ def update_stat(stat_id: int, stat_data: schemas.PlayerMatchStatsUpdate, db: Ses
     return stat
 
 @app.delete("/stats/{stat_id}", tags=["6. Player Match Stats CRUD"])
-def delete_stat(stat_id: int, db: Session = Depends(get_db)):
+def delete_stat(
+    stat_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
     stat = db.query(models.PlayerMatchStats).filter(models.PlayerMatchStats.id == stat_id).first()
     if not stat:
         raise HTTPException(status_code=404, detail="Statistica nu a fost gasita")

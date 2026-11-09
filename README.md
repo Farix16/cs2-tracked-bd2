@@ -37,3 +37,24 @@ Maps (`/maps`): `GET` (listare harti CS2), `POST` (adaugare harta), `PUT /{id}` 
 Matches (`/matches`): `GET` (istoric meciuri), `POST` (inregistrare meci nou), `PUT /{id}` (corectare scor CT/T), `DELETE /{id}` (stergere meci).
 
 Player Match Stats (`/stats`): `GET` (listare statistici per meci), `POST` (adaugare Kills/Deaths/ADR pentru un jucator intr-un meci), `PUT /{id}` (actualizare statistici), `DELETE /{id}` (stergere linie statistica).
+
+
+
+Etapa 3: Autentificare si Roluri (RBAC)
+Implementarea Autentificarii
+Stocarea parolelor: Parolele nu sunt stocate niciodata in clar. Se utilizeaza algoritmul criptografic `PBKDF2-HMAC-SHA256` cu 100.000 de iteratii si un `salt` aleatoriu de 16 bytes generat pentru fiecare utilizator (format `salt$hash`).
+
+Sesiuni / Tokenuri: Autentificarea se realizeaza prin ruta `POST /login` (OAuth2 Password Flow) care returneaza un token JWT (JSON Web Token) semnat cu `HS256`, valabil 60 de minute. Tokenul contine identitatea utilizatorului (`sub`) si rolul acestuia (`role`).
+
+Cele 3 Roluri si Drepturile de Acces
+1. Standard (`casual_user` / parola: `standard123`)**:
+    Poate vizualiza statisticile publice, jucatorii, hartile si meciurile (`GET`).
+    Isi poate verifica propriul profil prin ruta `/me`.
+    Nu poate sterge sau modifica date si nu are acces la ruta `/analytics/advanced`.
+2. Premium (`pro_player` / parola: `premium123`)**:
+    Are toate drepturile rolului Standard.
+    Are acces la statistici avansate prin ruta `/analytics/advanced`.
+    Poate adauga si actualiza jucatori, meciuri si statistici (`POST`, `PUT` pe `/players`, `/matches`, `/stats`).
+3. Admin (`admin_cs2` / parola: `admin123`)**:
+    Control complet asupra tuturor celor 6 entitati.
+    Singurul rol care poate sterge inregistrari (`DELETE`), gestiona roluri (`/roles`), harti (`/maps`) si vedea/modifica toti utilizatorii (`/users`).
