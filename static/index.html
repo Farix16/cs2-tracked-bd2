@@ -151,6 +151,18 @@
                 </div>
             </div>
             <p id="admin-msg" class="text-center font-bold text-sm"></p>
+            <!-- GENERATOR JUCATORI SI BENCHMARK INDECSI (ETAPA 4) -->
+            <div class="cs-card p-6 rounded-xl space-y-4 border border-amber-500/40">
+                <h3 class="text-xl font-bold cs-accent">3. Etapa 4: Generator Date in Masa & Benchmark Indecsi (Admin)</h3>
+                <p class="text-xs text-gray-400">Genereaza mii de jucatori si statistici dintr-un click pentru a testa indecsii SQL si Load Testing-ul.</p>
+                <div class="flex flex-wrap gap-4">
+                    <button onclick="generateBulkData(1000)" class="cs-btn px-5 py-2.5 rounded">+ Genereaza 1.000 Jucatori (3.000 Meciuri)</button>
+                    <button onclick="generateBulkData(3000)" class="bg-amber-600 hover:bg-amber-700 text-black font-bold px-5 py-2.5 rounded">+ Genereaza 3.000 Jucatori (9.000 Meciuri)</button>
+                    <button onclick="runIndexBenchmark()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded">Ruleaza Test Indecsi (Plan Executie)</button>
+                    <button onclick="clearBots()" class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded">Sterge Botii Generati</button>
+                </div>
+                <div id="benchmark-result" class="hidden bg-[#0b0f19] p-4 rounded-lg border border-gray-800 text-sm space-y-2"></div>
+            </div>
         </section>
 
     </main>
@@ -281,7 +293,7 @@
             grid.innerHTML = "";
 
             const filtered = allPlayers.filter(p => p.nickname.toLowerCase().includes(q) || p.steam_id.includes(q));
-            filtered.forEach(p => {
+            filtered.slice(0, 30).forEach(p => {
                 const agg = getPlayerAggregates(p.id);
                 grid.innerHTML += `
                     <div class="cs-card rounded-xl p-6 space-y-4 hover:border-amber-500/50 transition">
@@ -308,7 +320,7 @@
             tbody.innerHTML = "";
             const ranked = allPlayers.map(p => ({ ...p, agg: getPlayerAggregates(p.id) }))
                                      .sort((a, b) => parseFloat(b.agg.kd) - parseFloat(a.agg.kd));
-            ranked.forEach((p, idx) => {
+            ranked.slice(0, 50).forEach((p, idx) => {
                 tbody.innerHTML += `
                     <tr class="hover:bg-[#1a2337]">
                         <td class="p-4 font-black text-amber-400">#${idx + 1}</td>
@@ -413,6 +425,77 @@
 
         updateAuthUI();
         loadAllData();
+        async function generateBulkData(count) {
+            const msg = document.getElementById('admin-msg');
+            msg.className = "text-center font-bold text-sm text-amber-400";
+            msg.innerText = `Se genereaza ${count} jucatori si ${count * 3} statistici... Asteapta 2-3 secunde!`;
+
+            const res = await fetch(`/admin/generate-bulk?count=${count}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = data.detail || "Eroare! Trebuie sa fii logat ca Admin.";
+            } else {
+                msg.className = "text-center font-bold text-sm text-emerald-400";
+                msg.innerText = data.message;
+                loadAllData();
+            }
+        }
+
+        async function runIndexBenchmark() {
+            const box = document.getElementById('benchmark-result');
+            box.classList.remove('hidden');
+            box.innerHTML = "<p class='text-amber-400'>Se ruleaza interogarile si se extrag planurile de executie (EXPLAIN QUERY PLAN)...</p>";
+
+            const res = await fetch('/admin/benchmark-indexes', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                box.innerHTML = `<p class="text-red-400">${data.detail || "Eroare! Autentifica-te ca Admin."}</p>`;
+                return;
+            }
+            box.innerHTML = `
+                <p class="font-bold text-white">Rezultat pe ${data.total_stats_rows} inregistrari in tabela player_match_stats:</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                    <div class="p-3 bg-red-950/30 border border-red-800 rounded">
+                        <p class="font-bold text-red-400">INAINTE DE INDEX (Full Table Scan)</p>
+                        <p class="text-xs text-gray-300 mt-1"><b>Plan Executie:</b> ${data.before_indexes.execution_plan}</p>
+                        <p class="text-lg font-black text-white mt-2">Timp (20 rulari): ${data.before_indexes.time_20_runs_ms} ms</p>
+                    </div>
+                    <div class="p-3 bg-emerald-950/30 border border-emerald-800 rounded">
+                        <p class="font-bold text-emerald-400">DUPA INDEX (Index Search)</p>
+                        <p class="text-xs text-gray-300 mt-1"><b>Plan Executie:</b> ${data.after_indexes.execution_plan}</p>
+                        <p class="text-lg font-black text-white mt-2">Timp (20 rulari): ${data.after_indexes.time_20_runs_ms} ms</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function clearBots() {
+            const msg = document.getElementById('admin-msg');
+            msg.className = "text-center font-bold text-sm text-amber-400";
+            msg.innerText = "Se sterg botii generati...";
+
+            const res = await fetch('/admin/clear-bots', {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = data.detail || "Eroare! Doar Admin poate sterge botii.";
+            } else {
+                msg.className = "text-center font-bold text-sm text-emerald-400";
+                msg.innerText = data.message;
+                loadAllData();
+            }
+        }
     </script>
+    
 </body>
 </html>

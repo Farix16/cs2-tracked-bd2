@@ -419,3 +419,131 @@ def delete_stat(
     db.delete(stat)
     db.commit()
     return {"message": f"Statistica cu ID {stat_id} a fost stearsa"}
+
+#   7. ETAPA 4: PERFORMANTA (GENERATOR DATE, INDECSI SI PLANURI EXECUTIE)
+import random
+import time
+from sqlalchemy import text
+
+@app.post("/admin/generate-bulk", tags=["7. Performanta (Indecsi & Load Test)"])
+def generate_bulk_data(
+    count: int = 2000,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
+    """Genereaza rapid mii de jucatori si statistici pentru testarea indecsilor si Load Test."""
+    start_time = time.perf_counter()
+    maps = db.query(models.Map).all()
+    map_id = maps[0].id if maps else 1
+
+    match = db.query(models.Match).first()
+    if not match:
+        match = models.Match(map_id=map_id, team_ct_score=13, team_t_score=10)
+        db.add(match)
+        db.commit()
+        db.refresh(match)
+
+    existing_count = db.query(models.Player).count()
+    new_players = []
+    for i in range(existing_count + 1, existing_count + count + 1):
+        new_players.append(models.Player(
+            steam_id=f"7656119{i:010d}",
+            nickname=f"CS2_Player_{i}",
+            avatar_url="https://example.com/avatar.png"
+        ))
+    db.bulk_save_objects(new_players)
+    db.commit()
+
+    all_pids = [r[0] for r in db.query(models.Player.id).order_by(models.Player.id.desc()).limit(count).all()]
+    new_stats = []
+    for pid in all_pids:
+        for _ in range(3):
+            new_stats.append(models.PlayerMatchStats(
+                player_id=pid,
+                match_id=match.id,
+                kills=random.randint(5, 35),
+                deaths=random.randint(5, 25),
+                assists=random.randint(0, 12),
+                adr=round(random.uniform(45.0, 115.0), 1),
+                headshot_percentage=round(random.uniform(20.0, 75.0), 1)
+            ))
+    db.bulk_save_objects(new_stats)
+    db.commit()
+
+    elapsed = round((time.perf_counter() - start_time) * 1000, 2)
+    return {
+        "message": f"S-au generat {count} jucatori si {count * 3} statistici de meci in {elapsed} ms!",
+        "total_players": db.query(models.Player).count(),
+        "total_stats": db.query(models.PlayerMatchStats).count()
+    }
+
+
+@app.post("/admin/benchmark-indexes", tags=["7. Performanta (Indecsi & Load Test)"])
+def benchmark_indexes(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
+    """Compara planul de executie (EXPLAIN QUERY PLAN) si timpul de rulare INAINTE si DUPA adaugarea indecsilor."""
+    query_sql = """
+        SELECT p.nickname, s.kills, s.adr, s.headshot_percentage
+        FROM player_match_stats s
+        JOIN players p ON s.player_id = p.id
+        WHERE s.kills >= 28 AND s.adr >= 95.0
+        ORDER BY s.adr DESC
+        LIMIT 50
+    """
+
+
+
+    # 1. Stergem indecsii ca sa masuram performanta FARA indecsi
+    db.execute(text("DROP INDEX IF EXISTS idx_stats_kills_adr"))
+    db.execute(text("DROP INDEX IF EXISTS idx_stats_player_id"))
+    db.commit()
+
+    plan_before_rows = db.execute(text(f"EXPLAIN QUERY PLAN {query_sql}")).fetchall()
+    plan_before = " | ".join([str(r[-1]) for r in plan_before_rows])
+
+    t0 = time.perf_counter()
+    for _ in range(20):
+        db.execute(text(query_sql)).fetchall()
+    time_before_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    # 2. Cream indecsii compusi pe coloanele filtrate si de JOIN
+    db.execute(text("CREATE INDEX IF NOT EXISTS idx_stats_kills_adr ON player_match_stats (kills, adr DESC)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS idx_stats_player_id ON player_match_stats (player_id)"))
+    db.commit()
+
+    plan_after_rows = db.execute(text(f"EXPLAIN QUERY PLAN {query_sql}")).fetchall()
+    plan_after = " | ".join([str(r[-1]) for r in plan_after_rows])
+
+    t1 = time.perf_counter()
+    for _ in range(20):
+        db.execute(text(query_sql)).fetchall()
+    time_after_ms = round((time.perf_counter() - t1) * 1000, 2)
+
+    return {
+        "total_stats_rows": db.query(models.PlayerMatchStats).count(),
+        "before_indexes": {
+            "execution_plan": plan_before,
+            "time_20_runs_ms": time_before_ms
+        },
+        "after_indexes": {
+            "execution_plan": plan_after,
+            "time_20_runs_ms": time_after_ms
+        }
+    }
+
+@app.delete("/admin/clear-bots", tags=["7. Performanta (Indecsi & Load Test)"])
+def clear_generated_bots(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
+    """Sterge toti jucatorii generati automat (CS2_Player_*) si statisticile lor."""
+    bot_ids = [r[0] for r in db.query(models.Player.id).filter(models.Player.nickname.like("CS2_Player_%")).all()]
+    if not bot_ids:
+        return {"message": "Nu exista boti generati de sters."}
+
+    db.query(models.PlayerMatchStats).filter(models.PlayerMatchStats.player_id.in_(bot_ids)).delete(synchronize_session=False)
+    deleted_count = db.query(models.Player).filter(models.Player.id.in_(bot_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"message": f"Au fost stersi {deleted_count} boti si toate statisticile lor!"}

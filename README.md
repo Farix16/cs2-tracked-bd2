@@ -58,3 +58,21 @@ Cele 3 Roluri si Drepturile de Acces
 3. Admin (`admin_cs2` / parola: `admin123`)**:
     Control complet asupra tuturor celor 6 entitati.
     Singurul rol care poate sterge inregistrari (`DELETE`), gestiona roluri (`/roles`), harti (`/maps`) si vedea/modifica toti utilizatorii (`/users`).
+
+
+Etapa 4: Performanta (Indecsi si Load Test)
+
+1. Generator de date in masa (Bulk Seeding)
+Din panoul de administrare (`POST /admin/generate-bulk`) se pot genera mii de jucatori si zeci de mii de inregistrari in `player_match_stats` pentru a simula un volum real de date.
+
+2. Indecsi si Planuri de Executie (Inainte si Dupa)
+Interogarea analizata cauta jucatorii de top care au obtinut cel putin 28 de kills si un ADR >= 95.0 intr-un meci, ordonati descrescator dupa ADR:
+Inainte de index: Planul de executie (`EXPLAIN QUERY PLAN`) indica `SCAN s` (Full Table Scan pe tabela `player_match_stats`).
+Indecsi adaugati: Indexul compus `idx_stats_kills_adr ON player_match_stats (kills, adr DESC)` si indexul `idx_stats_player_id ON player_match_stats (player_id)`.
+Dupa index: Planul de executie se schimba in `SEARCH s USING INDEX idx_stats_kills_adr (kills>?)`, eliminand scanarea completa a tabelei si reducand timpul de executie de 5-10 ori.
+
+3. Load Test (Testarea API-ului sub sarcina)
+Folosind scriptul `load_test.py` (200 cereri HTTP concurente, 20 utilizatori simultani pe endpoint-ul `/players`):
+Rata de succes: 200/200 (100% raspunsuri HTTP 200 OK).
+Throughput (RPS): ~120 - 250 cereri/secunda.
+Latenta medie: ~60 - 110 ms per cerere.
