@@ -2,7 +2,7 @@ import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-URL = "http://127.0.0.1:8000/players"
+URL = "https://cs2-tracked.onrender.com"
 TOTAL_REQUESTS = 200
 CONCURRENT_USERS = 20
 
