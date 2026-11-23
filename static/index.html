@@ -170,6 +170,7 @@
                     <button onclick="generateBulkData(3000)" class="bg-amber-600 hover:bg-amber-700 text-black font-bold px-5 py-2.5 rounded">+ Genereaza 3.000 Jucatori (9.000 Meciuri)</button>
                     <button onclick="runIndexBenchmark()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded">Ruleaza Test Indecsi (Plan Executie)</button>
                     <button onclick="clearBots()" class="bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-2.5 rounded">Sterge Botii Generati</button>
+                    <button onclick="runBrowserLoadTest()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-5 py-2.5 rounded">Ruleaza Load Test (50 Cereri)</button>
                 </div>
                 <div id="benchmark-result" class="hidden bg-[#0b0f19] p-4 rounded-lg border border-gray-800 text-sm space-y-2"></div>
             </div>
@@ -541,6 +542,51 @@
                 msg.innerText = data.message;
                 loadAllData();
             }
+        }
+        async function runBrowserLoadTest() {
+            const box = document.getElementById('benchmark-result');
+            box.classList.remove('hidden');
+            const totalRequests = 50;
+            const concurrency = 10;
+            box.innerHTML = `<p class="text-purple-400">Se ruleaza Load Test (${totalRequests} cereri cu ${concurrency} utilizatori simultani pe /players)...</p>`;
+
+            const latencies = [];
+            let successes = 0;
+            const startTotal = performance.now();
+
+            for (let i = 0; i < totalRequests; i += concurrency) {
+                const batch = [];
+                for (let j = 0; j < concurrency && (i + j) < totalRequests; j++) {
+                    batch.push((async () => {
+                        const t0 = performance.now();
+                        try {
+                            const res = await fetch('/players');
+                            await res.text();
+                            if (res.ok) successes++;
+                        } catch (e) {}
+                        latencies.push(performance.now() - t0);
+                    })());
+                }
+                await Promise.all(batch);
+            }
+
+            const totalTimeSec = (performance.now() - startTotal) / 1000;
+            const avg = (latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(2);
+            const min = Math.min(...latencies).toFixed(2);
+            const max = Math.max(...latencies).toFixed(2);
+            const rps = (totalRequests / totalTimeSec).toFixed(2);
+
+            box.innerHTML = `
+                <p class="font-bold text-purple-400">REZULTATE LOAD TEST LIVE (pe /players):</p>
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-2 text-xs">
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Cereri reusite: <b class="text-emerald-400">${successes}/${totalRequests}</b></div>
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Timp total: <b class="text-white">${totalTimeSec.toFixed(2)} s</b></div>
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Throughput: <b class="text-amber-400">${rps} req/s</b></div>
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Latenta medie: <b class="text-white">${avg} ms</b></div>
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Latenta minima: <b class="text-emerald-400">${min} ms</b></div>
+                    <div class="p-2 bg-[#151c2c] rounded border border-gray-700">Latenta maxima: <b class="text-red-400">${max} ms</b></div>
+                </div>
+            `;
         }
     </script>
     
