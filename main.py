@@ -1,11 +1,20 @@
+import json
+import os
+import random
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from contextlib import asynccontextmanager
 from typing import List
-from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
-from fastapi.responses import FileResponse
+
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 import models
 import schemas
@@ -19,6 +28,7 @@ from auth import (
 from database import Base, SessionLocal, engine, get_db
 from seed import seed_data
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -29,15 +39,18 @@ async def lifespan(app: FastAPI):
         db.close()
     yield
 
+
 app = FastAPI(
     title="CS2 Stats Tracker API - Proiect BD2",
     description="Monitorizarea si inregistrarea statisticilor jucatorilor de CS2",
     lifespan=lifespan
 )
 
+
 @app.get("/", tags=["General"])
 def read_root():
     return FileResponse("static/index.html")
+
 
 # 0. AUTENTIFICARE SI VERIFICARE ROL CURENT (ETAPA 3)
 
@@ -57,6 +70,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "role": user.role.name
     }
 
+
 @app.get("/me", tags=["0. Autentificare & Roluri"])
 def get_my_profile(current_user: models.User = Depends(get_current_user)):
     return {
@@ -66,6 +80,7 @@ def get_my_profile(current_user: models.User = Depends(get_current_user)):
         "role": current_user.role.name,
         "permissions_description": current_user.role.description
     }
+
 
 @app.get("/analytics/advanced", tags=["0. Autentificare & Roluri"])
 def get_advanced_analytics(
@@ -83,6 +98,7 @@ def get_advanced_analytics(
         "message": "Statistici avansate deblocate pentru conturi Premium/Admin."
     }
 
+
 # 1. CRUD PENTRU ROLES (Modificari permise doar pentru Admin)
 
 @app.post("/roles", response_model=schemas.RoleResponse, tags=["1. Roles CRUD"])
@@ -97,9 +113,11 @@ def create_role(
     db.refresh(db_role)
     return db_role
 
+
 @app.get("/roles", response_model=List[schemas.RoleResponse], tags=["1. Roles CRUD"])
 def get_roles(db: Session = Depends(get_db)):
     return db.query(models.Role).all()
+
 
 @app.get("/roles/{role_id}", response_model=schemas.RoleResponse, tags=["1. Roles CRUD"])
 def get_role(role_id: int, db: Session = Depends(get_db)):
@@ -107,6 +125,7 @@ def get_role(role_id: int, db: Session = Depends(get_db)):
     if not role:
         raise HTTPException(status_code=404, detail="Rolul nu a fost gasit")
     return role
+
 
 @app.put("/roles/{role_id}", response_model=schemas.RoleResponse, tags=["1. Roles CRUD"])
 def update_role(
@@ -124,6 +143,7 @@ def update_role(
     db.refresh(role)
     return role
 
+
 @app.delete("/roles/{role_id}", tags=["1. Roles CRUD"])
 def delete_role(
     role_id: int,
@@ -136,6 +156,7 @@ def delete_role(
     db.delete(role)
     db.commit()
     return {"message": f"Rolul cu ID {role_id} a fost sters"}
+
 
 # 2. CRUD PENTRU USERS (Inregistrare publica, stergere doar Admin)
 
@@ -152,12 +173,14 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
+
 @app.get("/users", response_model=List[schemas.UserResponse], tags=["2. Users CRUD"])
 def get_users(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_roles(["Admin"]))
 ):
     return db.query(models.User).all()
+
 
 @app.get("/users/{user_id}", response_model=schemas.UserResponse, tags=["2. Users CRUD"])
 def get_user(
@@ -169,6 +192,7 @@ def get_user(
     if not user:
         raise HTTPException(status_code=404, detail="Utilizatorul nu a fost gasit")
     return user
+
 
 @app.put("/users/{user_id}", response_model=schemas.UserResponse, tags=["2. Users CRUD"])
 def update_user(
@@ -188,6 +212,7 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
 
 @app.delete("/users/{user_id}", tags=["2. Users CRUD"])
 def delete_user(
@@ -220,9 +245,11 @@ def create_player(
     db.refresh(db_player)
     return db_player
 
+
 @app.get("/players", response_model=List[schemas.PlayerResponse], tags=["3. Players CRUD"])
 def get_players(db: Session = Depends(get_db)):
     return db.query(models.Player).all()
+
 
 @app.get("/players/{player_id}", response_model=schemas.PlayerResponse, tags=["3. Players CRUD"])
 def get_player(player_id: int, db: Session = Depends(get_db)):
@@ -230,6 +257,7 @@ def get_player(player_id: int, db: Session = Depends(get_db)):
     if not player:
         raise HTTPException(status_code=404, detail="Jucatorul nu a fost gasit")
     return player
+
 
 @app.put("/players/{player_id}", response_model=schemas.PlayerResponse, tags=["3. Players CRUD"])
 def update_player(
@@ -247,6 +275,7 @@ def update_player(
     db.refresh(player)
     return player
 
+
 @app.delete("/players/{player_id}", tags=["3. Players CRUD"])
 def delete_player(
     player_id: int,
@@ -259,7 +288,6 @@ def delete_player(
     db.delete(player)
     db.commit()
     return {"message": f"Jucatorul cu ID {player_id} a fost sters"}
-
 
 
 # 4. CRUD PENTRU MAPS (Citire: toti | Modificare/Stergere: Admin)
@@ -276,9 +304,11 @@ def create_map(
     db.refresh(db_map)
     return db_map
 
+
 @app.get("/maps", response_model=List[schemas.MapResponse], tags=["4. Maps CRUD"])
 def get_maps(db: Session = Depends(get_db)):
     return db.query(models.Map).all()
+
 
 @app.get("/maps/{map_id}", response_model=schemas.MapResponse, tags=["4. Maps CRUD"])
 def get_map(map_id: int, db: Session = Depends(get_db)):
@@ -286,6 +316,7 @@ def get_map(map_id: int, db: Session = Depends(get_db)):
     if not game_map:
         raise HTTPException(status_code=404, detail="Harta nu a fost gasita")
     return game_map
+
 
 @app.put("/maps/{map_id}", response_model=schemas.MapResponse, tags=["4. Maps CRUD"])
 def update_map(
@@ -302,6 +333,7 @@ def update_map(
     db.commit()
     db.refresh(game_map)
     return game_map
+
 
 @app.delete("/maps/{map_id}", tags=["4. Maps CRUD"])
 def delete_map(
@@ -331,9 +363,11 @@ def create_match(
     db.refresh(db_match)
     return db_match
 
+
 @app.get("/matches", response_model=List[schemas.MatchResponse], tags=["5. Matches CRUD"])
 def get_matches(db: Session = Depends(get_db)):
     return db.query(models.Match).all()
+
 
 @app.get("/matches/{match_id}", response_model=schemas.MatchResponse, tags=["5. Matches CRUD"])
 def get_match(match_id: int, db: Session = Depends(get_db)):
@@ -341,6 +375,7 @@ def get_match(match_id: int, db: Session = Depends(get_db)):
     if not match:
         raise HTTPException(status_code=404, detail="Meciul nu a fost gasit")
     return match
+
 
 @app.put("/matches/{match_id}", response_model=schemas.MatchResponse, tags=["5. Matches CRUD"])
 def update_match(
@@ -358,6 +393,7 @@ def update_match(
     db.refresh(match)
     return match
 
+
 @app.delete("/matches/{match_id}", tags=["5. Matches CRUD"])
 def delete_match(
     match_id: int,
@@ -370,6 +406,7 @@ def delete_match(
     db.delete(match)
     db.commit()
     return {"message": f"Meciul cu ID {match_id} a fost sters"}
+
 
 # 6. CRUD PENTRU PLAYER_MATCH_STATS
 
@@ -385,9 +422,11 @@ def create_stats(
     db.refresh(db_stats)
     return db_stats
 
+
 @app.get("/stats", response_model=List[schemas.PlayerMatchStatsResponse], tags=["6. Player Match Stats CRUD"])
 def get_all_stats(db: Session = Depends(get_db)):
     return db.query(models.PlayerMatchStats).all()
+
 
 @app.get("/stats/{stat_id}", response_model=schemas.PlayerMatchStatsResponse, tags=["6. Player Match Stats CRUD"])
 def get_stat(stat_id: int, db: Session = Depends(get_db)):
@@ -395,6 +434,7 @@ def get_stat(stat_id: int, db: Session = Depends(get_db)):
     if not stat:
         raise HTTPException(status_code=404, detail="Statistica nu a fost gasita")
     return stat
+
 
 @app.put("/stats/{stat_id}", response_model=schemas.PlayerMatchStatsResponse, tags=["6. Player Match Stats CRUD"])
 def update_stat(
@@ -412,6 +452,7 @@ def update_stat(
     db.refresh(stat)
     return stat
 
+
 @app.delete("/stats/{stat_id}", tags=["6. Player Match Stats CRUD"])
 def delete_stat(
     stat_id: int,
@@ -425,10 +466,8 @@ def delete_stat(
     db.commit()
     return {"message": f"Statistica cu ID {stat_id} a fost stearsa"}
 
-#   7. ETAPA 4: PERFORMANTA (GENERATOR DATE, INDECSI SI PLANURI EXECUTIE)
-import random
-import time
-from sqlalchemy import text
+
+# 7. ETAPA 4: PERFORMANTA (GENERATOR DATE, INDECSI SI PLANURI EXECUTIE)
 
 @app.post("/admin/generate-bulk", tags=["7. Performanta (Indecsi & Load Test)"])
 def generate_bulk_data(
@@ -488,7 +527,8 @@ def benchmark_indexes(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_roles(["Admin"]))
 ):
-    """Compara planul de executie (EXPLAIN QUERY PLAN) si timpul de rulare INAINTE si DUPA adaugarea indecsilor."""
+    """Compara planul de executie (EXPLAIN / EXPLAIN QUERY PLAN) si timpul de rulare INAINTE si DUPA indecsi."""
+    explain_cmd = "EXPLAIN QUERY PLAN" if str(engine.url).startswith("sqlite") else "EXPLAIN"
     query_sql = """
         SELECT p.nickname, s.kills, s.adr, s.headshot_percentage
         FROM player_match_stats s
@@ -498,14 +538,12 @@ def benchmark_indexes(
         LIMIT 50
     """
 
-
-
     # 1. Stergem indecsii ca sa masuram performanta FARA indecsi
     db.execute(text("DROP INDEX IF EXISTS idx_stats_kills_adr"))
     db.execute(text("DROP INDEX IF EXISTS idx_stats_player_id"))
     db.commit()
 
-    plan_before_rows = db.execute(text(f"EXPLAIN QUERY PLAN {query_sql}")).fetchall()
+    plan_before_rows = db.execute(text(f"{explain_cmd} {query_sql}")).fetchall()
     plan_before = " | ".join([str(r[-1]) for r in plan_before_rows])
 
     t0 = time.perf_counter()
@@ -518,7 +556,7 @@ def benchmark_indexes(
     db.execute(text("CREATE INDEX IF NOT EXISTS idx_stats_player_id ON player_match_stats (player_id)"))
     db.commit()
 
-    plan_after_rows = db.execute(text(f"EXPLAIN QUERY PLAN {query_sql}")).fetchall()
+    plan_after_rows = db.execute(text(f"{explain_cmd} {query_sql}")).fetchall()
     plan_after = " | ".join([str(r[-1]) for r in plan_after_rows])
 
     t1 = time.perf_counter()
@@ -538,6 +576,7 @@ def benchmark_indexes(
         }
     }
 
+
 @app.delete("/admin/clear-bots", tags=["7. Performanta (Indecsi & Load Test)"])
 def clear_generated_bots(
     db: Session = Depends(get_db),
@@ -552,16 +591,12 @@ def clear_generated_bots(
     deleted_count = db.query(models.Player).filter(models.Player.id.in_(bot_ids)).delete(synchronize_session=False)
     db.commit()
     return {"message": f"Au fost stersi {deleted_count} boti si toate statisticile lor!"}
-    
-    # =====================================================================
+
+
 # 8. INTEGRARE STEAM WEB API (IMPORT JUCATOR DIRECT DIN STEAM)
-# =====================================================================
-import os
-import json
-import urllib.request
-import urllib.error
 
 STEAM_API_KEY = os.getenv("STEAM_API_KEY", "PUNE_CHEIA_TA_AICI_DOAR_LOCAL")
+
 
 @app.post("/players/import-steam/{steam_id}", tags=["3. Players CRUD"])
 def import_player_from_steam(
@@ -573,7 +608,7 @@ def import_player_from_steam(
     if not STEAM_API_KEY or STEAM_API_KEY == "PUNE_CHEIA_TA_AICI_DOAR_LOCAL":
         raise HTTPException(status_code=400, detail="Lipseste STEAM_API_KEY! Configureaza cheia in server.")
 
-# 0. Daca nu este un SteamID64 (17 cifre), il convertim din Custom URL (Vanity URL)
+    # 0. Daca nu este un SteamID64 (17 cifre), il convertim din Custom URL (Vanity URL)
     if not (steam_id.isdigit() and len(steam_id) == 17):
         vanity_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={STEAM_API_KEY}&vanityurl={steam_id}"
         try:
@@ -587,9 +622,6 @@ def import_player_from_steam(
             raise
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"Eroare la rezolvarea linkului Steam: {str(e)}")
-
-
-
 
     # 1. Cerem datele de profil (Nickname + Avatar)
     summary_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam_id}"
@@ -607,7 +639,6 @@ def import_player_from_steam(
     nickname = steam_user.get("personaname", f"Steam_{steam_id[-4:]}")
     avatar_url = steam_user.get("avatarfull", "")
 
-    # Verificam daca jucatorul exista deja in baza de date
     db_player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
     if not db_player:
         db_player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url)
@@ -619,7 +650,7 @@ def import_player_from_steam(
         db_player.avatar_url = avatar_url
         db.commit()
 
-    # 2. Cerem statisticile de CS2 (AppID 730) - functioneaza doar daca profilul are Game Details pe Public
+    # 2. Cerem statisticile de CS2 (AppID 730)
     stats_msg = "Profil importat! (Statisticile CS2 sunt private pe Steam)."
     stats_url = f"https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?appid=730&key={STEAM_API_KEY}&steamid={steam_id}"
     try:
@@ -651,7 +682,6 @@ def import_player_from_steam(
                 db.commit()
                 stats_msg = f"Profil + statistici CS2 importate (Kills: {total_kills}, ADR: {adr}, HS%: {hs_pct}%)!"
     except urllib.error.HTTPError:
-        # 403 Forbidden inseamna ca profilul Steam are statisticile pe Privat
         pass
     except Exception:
         pass
@@ -666,15 +696,17 @@ def import_player_from_steam(
         }
     }
 
+
 # 9. LOGIN CU STEAM, UPGRADE PREMIUM (1 EUR), DOWNGRADE & EDITARE PROFIL
-from pydantic import BaseModel
 
 class SteamLoginRequest(BaseModel):
     steam_input: str
 
+
 class ProfileUpdateRequest(BaseModel):
     nickname: str
     avatar_url: str = ""
+
 
 @app.post("/login-steam", tags=["0. Autentificare & Roluri"])
 def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
@@ -682,8 +714,6 @@ def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
     raw = payload.steam_input.strip()
     steam_id = raw
 
-    # Extragem SteamID64 sau numele din link daca userul a lipit un URL
-    import re
     m_prof = re.search(r"7656\d{13}", raw)
     m_vanity = re.search(r"steamcommunity\.com/id/([^/?#]+)", raw, re.IGNORECASE)
     if m_prof:
@@ -691,7 +721,6 @@ def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
     elif m_vanity:
         steam_id = m_vanity.group(1)
 
-    # Daca e nume personalizat si avem cheie Steam, il rezolvam in SteamID64
     if not (steam_id.isdigit() and len(steam_id) == 17) and STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL":
         try:
             v_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={STEAM_API_KEY}&vanityurl={steam_id}"
@@ -705,14 +734,12 @@ def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
     if not steam_id:
         raise HTTPException(status_code=400, detail="Introdu un SteamID64 sau un link de profil Steam valid.")
 
-    # Cautam daca exista deja cont pentru acest SteamID
     user = db.query(models.User).filter(models.User.steam_id == steam_id).first()
     if not user:
         standard_role = db.query(models.Role).filter(models.Role.name == "Standard").first()
         if not standard_role:
             raise HTTPException(status_code=500, detail="Rolul Standard nu exista in baza de date.")
 
-        # Incercam sa luam nickname-ul real de pe Steam daca exista cheia
         nickname = f"Steam_{steam_id[-6:]}"
         avatar_url = ""
         if STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL" and steam_id.isdigit():
@@ -726,7 +753,6 @@ def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
             except Exception:
                 pass
 
-        # Cream utilizatorul Standard
         unique_username = f"{nickname}_{steam_id[-4:]}"
         user = models.User(
             username=unique_username,
@@ -739,7 +765,6 @@ def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-        # Cream si profilul de Player daca nu exista deja
         player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
         if not player:
             player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url, is_manual=False)
@@ -825,7 +850,6 @@ def get_account_badges(db: Session = Depends(get_db)):
         for u in users
     }
 
-    import urllib.parse
 
 @app.get("/auth/steam", tags=["0. Autentificare & Roluri"])
 def auth_steam_redirect(request: Request):
@@ -853,7 +877,6 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
     if query_params.get("openid.mode") != "id_res":
         return RedirectResponse(url="/?steam_error=Autentificare+anulata")
 
-    # Verificam criptografic cu serverele Steam ca datele nu sunt falsificate
     verify_params = dict(query_params)
     verify_params["openid.mode"] = "check_authentication"
     data = urllib.parse.urlencode(verify_params).encode("utf-8")
@@ -868,9 +891,7 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
     if "is_valid:true" not in result_text:
         return RedirectResponse(url="/?steam_error=Semnatura+Steam+invalida")
 
-    # Extragem SteamID64 verificat din claimed_id
     claimed_id = query_params.get("openid.claimed_id", "")
-    import re
     m = re.search(r"(\d{17})$", claimed_id)
     if not m:
         return RedirectResponse(url="/?steam_error=SteamID+invalid")
@@ -878,7 +899,7 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
 
     has_api_key = bool(STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL")
 
-    # 1. Preluam Nickname-ul si Avatarul actual de pe Steam (daca avem cheia configurata)
+    # 1. Preluam Nickname-ul si Avatarul actual de pe Steam
     nickname = f"Steam_{steam_id[-6:]}"
     avatar_url = ""
     if has_api_key:
@@ -907,7 +928,7 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user)
 
-    # 3. Cautam sau cream profilul de Player si actualizam avatarul/nickname-ul
+    # 3. Cautam sau cream profilul de Player
     player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
     if not player:
         player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url, is_manual=False)
@@ -918,7 +939,7 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
         player.avatar_url = avatar_url
         db.commit()
 
-    # 4. Importam automat statisticile CS2 din Steam Web API (daca profilul are Game Details pe Public)
+    # 4. Importam automat statisticile CS2 din Steam Web API
     if has_api_key:
         try:
             stats_url = f"https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?appid=730&key={STEAM_API_KEY}&steamid={steam_id}"
@@ -957,7 +978,6 @@ def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
                         ))
                     db.commit()
         except Exception:
-            # Profil privat sau eroare temporara Steam -> continuam login-ul normal
             pass
 
     token = create_access_token(data={"sub": user.username, "role": user.role.name})
