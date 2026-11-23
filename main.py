@@ -547,8 +547,8 @@ def clear_generated_bots(
     deleted_count = db.query(models.Player).filter(models.Player.id.in_(bot_ids)).delete(synchronize_session=False)
     db.commit()
     return {"message": f"Au fost stersi {deleted_count} boti si toate statisticile lor!"}
-
-# =====================================================================
+    
+    # =====================================================================
 # 8. INTEGRARE STEAM WEB API (IMPORT JUCATOR DIRECT DIN STEAM)
 # =====================================================================
 import os
@@ -567,6 +567,24 @@ def import_player_from_steam(
     """Preia nickname, avatar si statistici CS2 direct din Steam Web API."""
     if not STEAM_API_KEY or STEAM_API_KEY == "PUNE_CHEIA_TA_AICI_DOAR_LOCAL":
         raise HTTPException(status_code=400, detail="Lipseste STEAM_API_KEY! Configureaza cheia in server.")
+
+# 0. Daca nu este un SteamID64 (17 cifre), il convertim din Custom URL (Vanity URL)
+    if not (steam_id.isdigit() and len(steam_id) == 17):
+        vanity_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={STEAM_API_KEY}&vanityurl={steam_id}"
+        try:
+            with urllib.request.urlopen(vanity_url, timeout=10) as resp:
+                vanity_data = json.loads(resp.read().decode()).get("response", {})
+                if vanity_data.get("success") == 1:
+                    steam_id = vanity_data["steamid"]
+                else:
+                    raise HTTPException(status_code=404, detail=f"Nu a fost gasit niciun profil Steam cu numele '{steam_id}'.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Eroare la rezolvarea linkului Steam: {str(e)}")
+
+
+
 
     # 1. Cerem datele de profil (Nickname + Avatar)
     summary_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam_id}"

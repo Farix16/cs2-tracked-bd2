@@ -507,11 +507,22 @@
         }
 
         async function importFromSteam() {
-            const steamId = document.getElementById('steam-import-id').value.trim();
+            const rawInput = document.getElementById('steam-import-id').value.trim();
             const msg = document.getElementById('admin-msg');
+
+            let steamId = rawInput;
+            const profileMatch = rawInput.match(/7656\d{13}/);
+            const vanityMatch = rawInput.match(/steamcommunity\.com\/id\/([^/?#]+)/i);
+
+            if (profileMatch) {
+                steamId = profileMatch[0];
+            } else if (vanityMatch) {
+                steamId = vanityMatch[1];
+            }
+
             if (!steamId) {
                 msg.className = "text-center font-bold text-sm text-red-400";
-                msg.innerText = "Introdu un SteamID64 valid!";
+                msg.innerText = "Introdu un link de profil Steam sau un SteamID64!";
                 return;
             }
             msg.className = "text-center font-bold text-sm text-blue-400";
