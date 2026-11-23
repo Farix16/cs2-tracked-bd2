@@ -88,3 +88,31 @@ Date preluate automat:
   Profil Steam (`ISteamUser/GetPlayerSummaries`): Nickname-ul real (`personaname`) si poza de profil (`avatarfull`).
   Statistici CS2 (`ISteamUserStats/GetUserStatsForGame`, AppID `730`): Total Kills, Total Deaths, calcul automat pentru ADR (Damage mediu pe runda) si Headshot % (pentru profilurile Steam care au setarea Game Details pe Public).
 Securitate: Cheia de acces nu este salvata in codul sursa de pe GitHub, ci este configurata securizat prin variabila de mediu `STEAM_API_KEY` (in sectiunea Environment pe Render).
+
+---
+
+Autentificare Securizata prin Steam (OpenID 2.0) & Sistem de Abonamente
+
+Pentru a garanta ca doar detinatorul real al unui cont Steam se poate autentifica, platforma integreaza protocolul oficial Steam OpenID 2.0 (similar cu Leetify / CSStats):
+
+Conectare prin Steam (`GET /auth/steam` & `GET /auth/steam/callback`):
+  Utilizatorul este redirectionat pe pagina oficiala Steam, iar serverul verifica criptografic semnatura primita (`check_authentication` -> `is_valid:true`).
+  La prima conectare se creeaza automat un cont cu rolul Standard si un profil de jucator asociat.
+  Import & sincronizare automata: La fiecare autentificare prin Steam, aplicatia preia si actualizeaza automat Nickname-ul, Avatarul si statisticile CS2 (`Kills`, `Deaths`, `ADR`, `HS%`) daca profilul are Game Details pe Public.
+Upgrade la Premium (`POST /me/upgrade`):
+  Utilizatorii logati cu rol Standard au acces la butonul Upgrade Premium (1 EUR/luna) din bara de navigare (simulare subscriptie), care le actualizeaza rolul in baza de date si emite un nou token JWT cu drepturi Premium.
+Beneficii & Transparenta Cont Premium:
+  Editare profil propriu (`PUT /me/profile`): Conturile Premium/Admin isi pot actualiza nickname-ul din platforma.
+  Marcare date manuale (`is_manual`): Jucatorii adaugati manual de un cont Premium sunt marcati automat in baza de date si afisati in Player Dashboard cu avertismentul **`Adaugat manual (Statistici neverificate)`.
+Administrare Conturi & Downgrade (`GET /account-badges`, `POST /admin/downgrade/{user_id}`):
+  Player Dashboard afiseaza badge-ul tipului de cont asociat fiecarui jucator (Standard / Premium).
+  Contul de Admin poate retrograda oricand un utilizator Premium inapoi la Standard direct din interfata, printr-un singur click.
+  onturile rapide de demonstratie (Admin, Premium, Standard) raman disponibile in fereastra de autentificare pentru testare rapida.
+
+---
+
+ Imbunatatiri Performanta & Securitate Interfata
+
+Suport flexibil linkuri Steam (`ResolveVanityURL`): Functia de import din Steam Web API accepta atat SteamID64, cat si linkuri complete de profil (`/profiles/7656...`) sau linkuri personalizate (`/id/nume/`).
+Load Test direct din Browser: In panoul de Etapa 4 a fost adaugat butonul Ruleaza Load Test (50 Cereri) care trimite cereri concurente (10 utilizatori simultani) catre `/players` direct din browser (util pentru demonstratii live pe Render, fara terminal), afisand rata de succes, throughput-ul (`req/s`) si latentele (`min`, `medie`, `max`).
+Restrictionare UI pentru Admin: Intregul panou de Etapa 4 (generator boti, benchmark indici SQL, stergere boti si Load Test) este vizibil exclusiv utilizatorilor autentificati cu rolul Admin.

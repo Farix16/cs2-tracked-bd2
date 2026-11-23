@@ -30,6 +30,8 @@
         </div>
         <div id="auth-area" class="flex items-center space-x-3">
             <span id="user-badge" class="text-sm text-gray-400">Neautentificat (Vizitator)</span>
+            <button id="upgrade-btn" onclick="upgradeToPremium()" class="hidden bg-amber-500 hover:bg-amber-600 text-black font-bold px-3 py-1.5 rounded text-xs">★ Upgrade Premium (1€/luna)</button>
+            <button id="edit-profile-btn" onclick="editMyProfile()" class="hidden bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs">Editeaza Profil</button>
             <button id="login-btn" onclick="toggleLoginModal()" class="cs-btn px-4 py-1.5 rounded text-sm">Autentificare</button>
             <button id="logout-btn" onclick="logout()" class="hidden bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-sm font-bold">Iesire</button>
         </div>
@@ -162,7 +164,7 @@
             </div>
             <p id="admin-msg" class="text-center font-bold text-sm"></p>
             <!-- GENERATOR JUCATORI SI BENCHMARK INDECSI (ETAPA 4) -->
-            <div class="cs-card p-6 rounded-xl space-y-4 border border-amber-500/40">
+            <div id="etapa4-admin-panel" class="hidden cs-card p-6 rounded-xl space-y-4 border border-amber-500/40">
                 <h3 class="text-xl font-bold cs-accent">3. Etapa 4: Generator Date in Masa & Benchmark Indecsi (Admin)</h3>
                 <p class="text-xs text-gray-400">Genereaza mii de jucatori si statistici dintr-un click pentru a testa indecsii SQL si Load Testing-ul.</p>
                 <div class="flex flex-wrap gap-4">
@@ -182,14 +184,27 @@
     <div id="login-modal" class="hidden fixed inset-0 bg-black/75 flex items-center justify-center z-50">
         <div class="cs-card p-8 rounded-xl w-full max-w-md space-y-4">
             <h3 class="text-2xl font-bold text-white">Autentificare Platforma</h3>
-            <p class="text-xs text-gray-400">Conturi predefinite din Fixtures (apasa pe unul pentru completare rapida):</p>
-            <div class="flex gap-2 text-xs">
-                <button onclick="fillLogin('admin_cs2','admin123')" class="bg-red-900/50 border border-red-500 text-red-200 px-2 py-1 rounded">Admin</button>
-                <button onclick="fillLogin('pro_player','premium123')" class="bg-amber-900/50 border border-amber-500 text-amber-200 px-2 py-1 rounded">Premium</button>
-                <button onclick="fillLogin('casual_user','standard123')" class="bg-blue-900/50 border border-blue-500 text-blue-200 px-2 py-1 rounded">Standard</button>
+
+            <!-- LOGIN DIRECT CU STEAM (OPENID OFICIAL) -->
+            <div class="bg-[#0b0f19] p-4 rounded-lg border border-blue-500/40 space-y-2 text-center">
+                <p class="text-xs font-bold text-blue-400 uppercase">Autentificare Securizata prin Steam</p>
+                <p class="text-xs text-gray-400">Te conectezi direct pe site-ul oficial Steam (OpenID 2.0).</p>
+                <a href="/auth/steam" class="block w-full bg-[#171a21] hover:bg-[#2a475e] border border-blue-500/50 text-white font-bold py-2.5 rounded text-sm transition">
+                    Sign in through STEAM
+                </a>
             </div>
-            <input id="login-user" type="text" placeholder="Username" class="w-full p-3 rounded bg-[#0b0f19] border border-gray-700 text-white">
-            <input id="login-pass" type="password" placeholder="Parola" class="w-full p-3 rounded bg-[#0b0f19] border border-gray-700 text-white">
+
+            <div class="border-t border-gray-800 pt-3 space-y-3">
+                <p class="text-xs text-gray-400">Sau foloseste conturile rapide (Admin / Premium / Standard):</p>
+                <div class="flex gap-2 text-xs">
+                    <button onclick="fillLogin('admin_cs2','admin123')" class="bg-red-900/50 border border-red-500 text-red-200 px-2 py-1 rounded">Admin</button>
+                    <button onclick="fillLogin('pro_player','premium123')" class="bg-amber-900/50 border border-amber-500 text-amber-200 px-2 py-1 rounded">Premium</button>
+                    <button onclick="fillLogin('casual_user','standard123')" class="bg-blue-900/50 border border-blue-500 text-blue-200 px-2 py-1 rounded">Standard</button>
+                </div>
+                <input id="login-user" type="text" placeholder="Username" class="w-full p-2.5 rounded bg-[#0b0f19] border border-gray-700 text-white text-sm">
+                <input id="login-pass" type="password" placeholder="Parola" class="w-full p-2.5 rounded bg-[#0b0f19] border border-gray-700 text-white text-sm">
+            </div>
+
             <p id="login-error" class="text-red-400 text-xs"></p>
             <div class="flex justify-end gap-3 pt-2">
                 <button onclick="toggleLoginModal()" class="px-4 py-2 rounded bg-gray-800 text-gray-300">Anuleaza</button>
@@ -202,6 +217,7 @@
         let token = localStorage.getItem("cs2_token") || null;
         let currentUser = JSON.parse(localStorage.getItem("cs2_user") || "null");
         let allPlayers = [], allStats = [], allMatches = [], allMaps = [];
+        let accountBadges = {};
 
         function showSection(name) {
             ['home', 'leaderboard', 'matches', 'admin'].forEach(s => {
@@ -254,6 +270,8 @@
             const badge = document.getElementById('user-badge');
             const loginBtn = document.getElementById('login-btn');
             const logoutBtn = document.getElementById('logout-btn');
+            const upgradeBtn = document.getElementById('upgrade-btn');
+            const editBtn = document.getElementById('edit-profile-btn');
             const roleCard = document.getElementById('stat-current-role');
 
             if (currentUser) {
@@ -261,22 +279,34 @@
                 roleCard.innerText = currentUser.role;
                 loginBtn.classList.add('hidden');
                 logoutBtn.classList.remove('hidden');
+
+                if (currentUser.role === 'Standard') upgradeBtn.classList.remove('hidden');
+                else upgradeBtn.classList.add('hidden');
+
+                if ((currentUser.role === 'Premium' || currentUser.role === 'Admin') && currentUser.steam_id) editBtn.classList.remove('hidden');
+                else editBtn.classList.add('hidden');
             } else {
                 badge.innerText = "Neautentificat (Vizitator)";
                 roleCard.innerText = "Vizitator";
                 loginBtn.classList.remove('hidden');
                 logoutBtn.classList.add('hidden');
+                upgradeBtn.classList.add('hidden');
+                editBtn.classList.add('hidden');
             }
+            const etapa4Panel = document.getElementById('etapa4-admin-panel');
+            if (currentUser && currentUser.role === 'Admin') etapa4Panel.classList.remove('hidden');
+            else etapa4Panel.classList.add('hidden');
         }
 
         async function loadAllData() {
-            const [pRes, sRes, mRes, mapRes] = await Promise.all([
-                fetch('/players'), fetch('/stats'), fetch('/matches'), fetch('/maps')
+            const [pRes, sRes, mRes, mapRes, bRes] = await Promise.all([
+                fetch('/players'), fetch('/stats'), fetch('/matches'), fetch('/maps'), fetch('/account-badges')
             ]);
             allPlayers = await pRes.json();
             allStats = await sRes.json();
             allMatches = await mRes.json();
             allMaps = await mapRes.json();
+            accountBadges = await bRes.json();
 
             document.getElementById('stat-players-count').innerText = allPlayers.length;
             document.getElementById('stat-matches-count').innerText = allMatches.length;
@@ -306,21 +336,39 @@
             const filtered = allPlayers.filter(p => p.nickname.toLowerCase().includes(q) || p.steam_id.includes(q));
             filtered.slice(0, 30).forEach(p => {
                 const agg = getPlayerAggregates(p.id);
+                const acc = accountBadges[p.steam_id];
+                const roleBadge = acc
+                    ? `<span class="text-xs px-2 py-0.5 rounded font-bold ${acc.role === 'Premium' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'}">Cont: ${acc.role}</span>`
+                    : '';
+                const manualWarning = p.is_manual
+                    ? `<p class="text-xs text-orange-400 bg-orange-950/40 border border-orange-500/30 px-2 py-1 rounded">⚠ Adaugat manual (Statistici neverificate)</p>`
+                    : '';
+                const downgradeBtn = (currentUser && currentUser.role === 'Admin' && acc && acc.role === 'Premium')
+                    ? `<button onclick="downgradeUser(${acc.user_id})" class="text-xs bg-orange-600 hover:bg-orange-700 text-white px-2.5 py-1 rounded font-bold">Downgrade la Standard</button>`
+                    : '';
+
                 grid.innerHTML += `
-                    <div class="cs-card rounded-xl p-6 space-y-4 hover:border-amber-500/50 transition">
+                    <div class="cs-card rounded-xl p-6 space-y-3 hover:border-amber-500/50 transition">
                         <div class="flex justify-between items-start">
                             <div>
-                                <h3 class="text-xl font-bold text-white">${p.nickname}</h3>
-                                <p class="text-xs text-gray-400">SteamID: ${p.steam_id} | ID: #${p.id}</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <h3 class="text-xl font-bold text-white">${p.nickname}</h3>
+                                    ${roleBadge}
+                                </div>
+                                <p class="text-xs text-gray-400 mt-0.5">SteamID: ${p.steam_id} | ID: #${p.id}</p>
                             </div>
                             <span class="bg-amber-500/10 text-amber-400 text-xs px-2.5 py-1 rounded font-bold">K/D: ${agg.kd}</span>
                         </div>
+                        ${manualWarning}
                         <div class="grid grid-cols-3 gap-2 text-center bg-[#0b0f19] p-3 rounded-lg">
                             <div><p class="text-xs text-gray-400">Kills/Deaths</p><p class="font-bold text-white">${agg.kills}/${agg.deaths}</p></div>
                             <div><p class="text-xs text-gray-400">ADR</p><p class="font-bold text-amber-400">${agg.adr}</p></div>
                             <div><p class="text-xs text-gray-400">HS %</p><p class="font-bold text-emerald-400">${agg.hs}%</p></div>
                         </div>
-                        ${currentUser && currentUser.role === 'Admin' ? `<button onclick="deletePlayer(${p.id})" class="text-xs text-red-400 hover:underline">Sterge jucator (Admin)</button>` : ''}
+                        <div class="flex justify-between items-center pt-1">
+                            ${currentUser && currentUser.role === 'Admin' ? `<button onclick="deletePlayer(${p.id})" class="text-xs text-red-400 hover:underline">Sterge jucator (Admin)</button>` : '<span></span>'}
+                            ${downgradeBtn}
+                        </div>
                     </div>
                 `;
             });
@@ -434,8 +482,6 @@
             else alert("Doar rolul Admin poate sterge jucatori!");
         }
 
-        updateAuthUI();
-        loadAllData();
         async function generateBulkData(count) {
             const msg = document.getElementById('admin-msg');
             msg.className = "text-center font-bold text-sm text-amber-400";
@@ -543,6 +589,7 @@
                 loadAllData();
             }
         }
+
         async function runBrowserLoadTest() {
             const box = document.getElementById('benchmark-result');
             box.classList.remove('hidden');
@@ -588,7 +635,92 @@
                 </div>
             `;
         }
+
+        async function loginWithSteam() {
+            const steam_input = document.getElementById('steam-login-input').value.trim();
+            if (!steam_input) {
+                document.getElementById('login-error').innerText = "Introdu un SteamID64 sau un link de profil Steam!";
+                return;
+            }
+            const res = await fetch('/login-steam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ steam_input })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                document.getElementById('login-error').innerText = data.detail || "Eroare la conectarea cu Steam.";
+                return;
+            }
+            token = data.access_token;
+            currentUser = { username: data.username, role: data.role, steam_id: data.steam_id };
+            localStorage.setItem("cs2_token", token);
+            localStorage.setItem("cs2_user", JSON.stringify(currentUser));
+            toggleLoginModal();
+            updateAuthUI();
+            loadAllData();
+        }
+
+        async function upgradeToPremium() {
+            if (!confirm("Doresti sa activezi subscriptia CS2Tracker Premium pentru 1 EUR/luna (simulare)?")) return;
+            const res = await fetch('/me/upgrade', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                alert(data.detail || "Eroare la upgrade.");
+                return;
+            }
+            token = data.access_token;
+            currentUser = { username: data.username, role: data.role, steam_id: data.steam_id };
+            localStorage.setItem("cs2_token", token);
+            localStorage.setItem("cs2_user", JSON.stringify(currentUser));
+            alert(data.message);
+            updateAuthUI();
+            loadAllData();
+        }
+
+        async function editMyProfile() {
+            const newNick = prompt("Introdu noul tau Nickname in-game:");
+            if (!newNick || !newNick.trim()) return;
+            const res = await fetch('/me/profile', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ nickname: newNick.trim() })
+            });
+            const data = await res.json();
+            alert(data.message || data.detail);
+            if (res.ok) loadAllData();
+        }
+
+        async function downgradeUser(userId) {
+            const res = await fetch(`/admin/downgrade/${userId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            alert(data.message || data.detail);
+            if (res.ok) loadAllData();
+        }
+
+// Verifica daca utilizatorul tocmai s-a intors din login-ul oficial Steam OpenID
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get("steam_token")) {
+            token = urlParams.get("steam_token");
+            currentUser = {
+                username: urlParams.get("steam_user"),
+                role: urlParams.get("steam_role"),
+                steam_id: urlParams.get("steam_id")
+            };
+            localStorage.setItem("cs2_token", token);
+            localStorage.setItem("cs2_user", JSON.stringify(currentUser));
+            window.history.replaceState({}, document.title, "/");
+        } else if (urlParams.get("steam_error")) {
+            alert("Eroare Steam Login: " + urlParams.get("steam_error"));
+            window.history.replaceState({}, document.title, "/");
+        }
+
+        updateAuthUI();
+        loadAllData();
     </script>
-    
-</body>
-</html>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database import Base
@@ -18,6 +18,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
     role = relationship("Role", back_populates="users")
+    steam_id = Column(String, unique=True, nullable=True)
 
 class Player(Base):
     __tablename__ = "players"
@@ -26,6 +27,7 @@ class Player(Base):
     nickname = Column(String(100), nullable=False)
     avatar_url = Column(String(255))
     match_stats = relationship("PlayerMatchStats", back_populates="player", cascade="all, delete-orphan")
+    is_manual = Column(Boolean, default=False)
 
 class Map(Base):
     __tablename__ = "maps"
@@ -68,3 +70,4 @@ class PlayerMatchStats(Base):
     )
     player = relationship("Player", back_populates="match_stats")
     match = relationship("Match", back_populates="player_stats")
+    

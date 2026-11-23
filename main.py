@@ -4,6 +4,8 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import FileResponse, RedirectResponse
 
 import models
 import schemas
@@ -209,7 +211,10 @@ def create_player(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
 ):
-    db_player = models.Player(**player.model_dump())
+    db_player = models.Player(
+        **player.model_dump(),
+        is_manual=(current_user.role.name == "Premium")
+    )
     db.add(db_player)
     db.commit()
     db.refresh(db_player)
@@ -660,3 +665,306 @@ def import_player_from_steam(
             "avatar_url": db_player.avatar_url
         }
     }
+
+# 9. LOGIN CU STEAM, UPGRADE PREMIUM (1 EUR), DOWNGRADE & EDITARE PROFIL
+from pydantic import BaseModel
+
+class SteamLoginRequest(BaseModel):
+    steam_input: str
+
+class ProfileUpdateRequest(BaseModel):
+    nickname: str
+    avatar_url: str = ""
+
+@app.post("/login-steam", tags=["0. Autentificare & Roluri"])
+def login_with_steam(payload: SteamLoginRequest, db: Session = Depends(get_db)):
+    """Logare sau creare automata de cont Standard direct cu SteamID / link Steam."""
+    raw = payload.steam_input.strip()
+    steam_id = raw
+
+    # Extragem SteamID64 sau numele din link daca userul a lipit un URL
+    import re
+    m_prof = re.search(r"7656\d{13}", raw)
+    m_vanity = re.search(r"steamcommunity\.com/id/([^/?#]+)", raw, re.IGNORECASE)
+    if m_prof:
+        steam_id = m_prof.group(0)
+    elif m_vanity:
+        steam_id = m_vanity.group(1)
+
+    # Daca e nume personalizat si avem cheie Steam, il rezolvam in SteamID64
+    if not (steam_id.isdigit() and len(steam_id) == 17) and STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL":
+        try:
+            v_url = f"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key={STEAM_API_KEY}&vanityurl={steam_id}"
+            with urllib.request.urlopen(v_url, timeout=8) as resp:
+                v_data = json.loads(resp.read().decode()).get("response", {})
+                if v_data.get("success") == 1:
+                    steam_id = v_data["steamid"]
+        except Exception:
+            pass
+
+    if not steam_id:
+        raise HTTPException(status_code=400, detail="Introdu un SteamID64 sau un link de profil Steam valid.")
+
+    # Cautam daca exista deja cont pentru acest SteamID
+    user = db.query(models.User).filter(models.User.steam_id == steam_id).first()
+    if not user:
+        standard_role = db.query(models.Role).filter(models.Role.name == "Standard").first()
+        if not standard_role:
+            raise HTTPException(status_code=500, detail="Rolul Standard nu exista in baza de date.")
+
+        # Incercam sa luam nickname-ul real de pe Steam daca exista cheia
+        nickname = f"Steam_{steam_id[-6:]}"
+        avatar_url = ""
+        if STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL" and steam_id.isdigit():
+            try:
+                s_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam_id}"
+                with urllib.request.urlopen(s_url, timeout=8) as resp:
+                    plist = json.loads(resp.read().decode()).get("response", {}).get("players", [])
+                    if plist:
+                        nickname = plist[0].get("personaname", nickname)
+                        avatar_url = plist[0].get("avatarfull", "")
+            except Exception:
+                pass
+
+        # Cream utilizatorul Standard
+        unique_username = f"{nickname}_{steam_id[-4:]}"
+        user = models.User(
+            username=unique_username,
+            email=f"{steam_id}@steam.local",
+            password_hash=hash_password(f"steam_oauth_{steam_id}"),
+            role_id=standard_role.id,
+            steam_id=steam_id
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        # Cream si profilul de Player daca nu exista deja
+        player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
+        if not player:
+            player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url, is_manual=False)
+            db.add(player)
+            db.commit()
+
+    token = create_access_token(data={"sub": user.username, "role": user.role.name})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "username": user.username,
+        "role": user.role.name,
+        "steam_id": user.steam_id
+    }
+
+
+@app.post("/me/upgrade", tags=["0. Autentificare & Roluri"])
+def upgrade_to_premium(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Simuleaza o subscriptie de 1 EUR/luna si face upgrade contului la Premium."""
+    premium_role = db.query(models.Role).filter(models.Role.name == "Premium").first()
+    if not premium_role:
+        raise HTTPException(status_code=500, detail="Rolul Premium nu a fost gasit.")
+
+    current_user.role_id = premium_role.id
+    db.commit()
+    db.refresh(current_user)
+
+    new_token = create_access_token(data={"sub": current_user.username, "role": "Premium"})
+    return {
+        "message": "Felicitari! Subscriptia de 1 EUR/luna a fost activata. Ai acum cont Premium!",
+        "access_token": new_token,
+        "username": current_user.username,
+        "role": "Premium",
+        "steam_id": current_user.steam_id
+    }
+
+
+@app.put("/me/profile", tags=["0. Autentificare & Roluri"])
+def update_my_player_profile(
+    data: ProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Premium", "Admin"]))
+):
+    """Permite conturilor Premium/Admin sa isi modifice propriul profil de jucator."""
+    if not current_user.steam_id:
+        raise HTTPException(status_code=400, detail="Contul tau nu are un profil Steam asociat.")
+    player = db.query(models.Player).filter(models.Player.steam_id == current_user.steam_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Profilul de jucator nu a fost gasit.")
+
+    player.nickname = data.nickname
+    if data.avatar_url:
+        player.avatar_url = data.avatar_url
+    db.commit()
+    return {"message": f"Profilul tau a fost actualizat la nickname-ul '{player.nickname}'!"}
+
+
+@app.post("/admin/downgrade/{user_id}", tags=["0. Autentificare & Roluri"])
+def downgrade_user_to_standard(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin"]))
+):
+    """Permite Adminului sa dea downgrade unui cont Premium inapoi la Standard."""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilizatorul nu a fost gasit.")
+    standard_role = db.query(models.Role).filter(models.Role.name == "Standard").first()
+    user.role_id = standard_role.id
+    db.commit()
+    return {"message": f"Utilizatorul {user.username} a primit downgrade la Standard."}
+
+
+@app.get("/account-badges", tags=["0. Autentificare & Roluri"])
+def get_account_badges(db: Session = Depends(get_db)):
+    """Returneaza tipul de cont (Standard/Premium/Admin) asociat fiecarui SteamID pentru Dashboard."""
+    users = db.query(models.User).filter(models.User.steam_id.isnot(None)).all()
+    return {
+        u.steam_id: {"user_id": u.id, "username": u.username, "role": u.role.name}
+        for u in users
+    }
+
+    import urllib.parse
+
+@app.get("/auth/steam", tags=["0. Autentificare & Roluri"])
+def auth_steam_redirect(request: Request):
+    """Trimite utilizatorul pe pagina oficiala Steam OpenID pentru a-si dovedi identitatea."""
+    base_url = str(request.base_url).rstrip("/")
+    if "onrender.com" in base_url and base_url.startswith("http://"):
+        base_url = base_url.replace("http://", "https://", 1)
+
+    params = {
+        "openid.ns": "http://specs.openid.net/auth/2.0",
+        "openid.mode": "checkid_setup",
+        "openid.return_to": f"{base_url}/auth/steam/callback",
+        "openid.realm": f"{base_url}/",
+        "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
+        "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+    }
+    steam_url = "https://steamcommunity.com/openid/login?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=steam_url)
+
+
+@app.get("/auth/steam/callback", tags=["0. Autentificare & Roluri"])
+def auth_steam_callback(request: Request, db: Session = Depends(get_db)):
+    """Verifica semnatura primita de la Steam, logheaza utilizatorul si importa automat statisticile CS2."""
+    query_params = dict(request.query_params)
+    if query_params.get("openid.mode") != "id_res":
+        return RedirectResponse(url="/?steam_error=Autentificare+anulata")
+
+    # Verificam criptografic cu serverele Steam ca datele nu sunt falsificate
+    verify_params = dict(query_params)
+    verify_params["openid.mode"] = "check_authentication"
+    data = urllib.parse.urlencode(verify_params).encode("utf-8")
+
+    try:
+        req = urllib.request.Request("https://steamcommunity.com/openid/login", data=data, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result_text = resp.read().decode("utf-8")
+    except Exception:
+        return RedirectResponse(url="/?steam_error=Eroare+comunicare+Steam")
+
+    if "is_valid:true" not in result_text:
+        return RedirectResponse(url="/?steam_error=Semnatura+Steam+invalida")
+
+    # Extragem SteamID64 verificat din claimed_id
+    claimed_id = query_params.get("openid.claimed_id", "")
+    import re
+    m = re.search(r"(\d{17})$", claimed_id)
+    if not m:
+        return RedirectResponse(url="/?steam_error=SteamID+invalid")
+    steam_id = m.group(1)
+
+    has_api_key = bool(STEAM_API_KEY and STEAM_API_KEY != "PUNE_CHEIA_TA_AICI_DOAR_LOCAL")
+
+    # 1. Preluam Nickname-ul si Avatarul actual de pe Steam (daca avem cheia configurata)
+    nickname = f"Steam_{steam_id[-6:]}"
+    avatar_url = ""
+    if has_api_key:
+        try:
+            s_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam_id}"
+            with urllib.request.urlopen(s_url, timeout=8) as resp:
+                plist = json.loads(resp.read().decode()).get("response", {}).get("players", [])
+                if plist:
+                    nickname = plist[0].get("personaname", nickname)
+                    avatar_url = plist[0].get("avatarfull", "")
+        except Exception:
+            pass
+
+    # 2. Cautam sau cream contul de User (Standard)
+    user = db.query(models.User).filter(models.User.steam_id == steam_id).first()
+    if not user:
+        standard_role = db.query(models.Role).filter(models.Role.name == "Standard").first()
+        user = models.User(
+            username=f"{nickname}_{steam_id[-4:]}",
+            email=f"{steam_id}@steam.local",
+            password_hash=hash_password(f"steam_openid_{steam_id}"),
+            role_id=standard_role.id,
+            steam_id=steam_id
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    # 3. Cautam sau cream profilul de Player si actualizam avatarul/nickname-ul
+    player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
+    if not player:
+        player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url, is_manual=False)
+        db.add(player)
+        db.commit()
+        db.refresh(player)
+    elif avatar_url:
+        player.avatar_url = avatar_url
+        db.commit()
+
+    # 4. Importam automat statisticile CS2 din Steam Web API (daca profilul are Game Details pe Public)
+    if has_api_key:
+        try:
+            stats_url = f"https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?appid=730&key={STEAM_API_KEY}&steamid={steam_id}"
+            with urllib.request.urlopen(stats_url, timeout=8) as resp:
+                stats_data = json.loads(resp.read().decode())
+                raw_stats = {s["name"]: s["value"] for s in stats_data.get("playerstats", {}).get("stats", [])}
+
+                total_kills = raw_stats.get("total_kills", 0)
+                total_deaths = raw_stats.get("total_deaths", 1)
+                total_hs = raw_stats.get("total_kills_headshot", 0)
+                total_dmg = raw_stats.get("total_damage_done", 0)
+                total_rounds = raw_stats.get("total_rounds_played", 1)
+
+                hs_pct = round((total_hs / total_kills) * 100, 1) if total_kills > 0 else 0.0
+                adr = round(total_dmg / total_rounds, 1) if total_rounds > 0 else 0.0
+
+                match = db.query(models.Match).first()
+                if match and total_kills > 0:
+                    existing_stat = db.query(models.PlayerMatchStats).filter(
+                        models.PlayerMatchStats.player_id == player.id
+                    ).first()
+                    if existing_stat:
+                        existing_stat.kills = total_kills
+                        existing_stat.deaths = total_deaths
+                        existing_stat.adr = min(adr, 500.0)
+                        existing_stat.headshot_percentage = min(hs_pct, 100.0)
+                    else:
+                        db.add(models.PlayerMatchStats(
+                            player_id=player.id,
+                            match_id=match.id,
+                            kills=total_kills,
+                            deaths=total_deaths,
+                            assists=0,
+                            adr=min(adr, 500.0),
+                            headshot_percentage=min(hs_pct, 100.0)
+                        ))
+                    db.commit()
+        except Exception:
+            # Profil privat sau eroare temporara Steam -> continuam login-ul normal
+            pass
+
+    token = create_access_token(data={"sub": user.username, "role": user.role.name})
+    redirect_params = urllib.parse.urlencode({
+        "steam_token": token,
+        "steam_user": user.username,
+        "steam_role": user.role.name,
+        "steam_id": steam_id
+    })
+    return RedirectResponse(url=f"/?{redirect_params}")

@@ -59,6 +59,7 @@ class PlayerResponse(PlayerBase):
     id: int
     class Config:
         from_attributes = True
+    is_manual: bool = False
 
 
 #4.mape
