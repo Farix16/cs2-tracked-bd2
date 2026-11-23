@@ -76,3 +76,15 @@ Folosind scriptul `load_test.py` (200 cereri HTTP concurente, 20 utilizatori sim
 Rata de succes: 200/200 (100% raspunsuri HTTP 200 OK).
 Throughput (RPS): ~120 - 250 cereri/secunda.
 Latenta medie: ~60 - 110 ms per cerere.
+
+4. Curatare date de test (Stergere Boti Generati)
+Endpoint: `DELETE /admin/clear-bots` (accesibil doar pentru rolul Admin).
+Functionalitate: Din panoul de administrare exista un buton dedicat (Sterge Botii Generati) care elimina dintr-un click toti jucatorii generati automat pentru testele de performanta (`CS2_Player_%`) impreuna cu statisticile lor asociate din tabela `player_match_stats`, readucand baza de date la starea curata.
+
+5. Integrare Steam Web API (Import Jucatori Reali)
+Aplicatia permite preluarea datelor reale ale jucatorilor direct de pe serverele Valve/Steam folosind SteamID64:
+Endpoint: `POST /players/import-steam/{steam_id}` (accesibil pentru rolurile Premium si Admin).
+Date preluate automat:
+  Profil Steam (`ISteamUser/GetPlayerSummaries`): Nickname-ul real (`personaname`) si poza de profil (`avatarfull`).
+  Statistici CS2 (`ISteamUserStats/GetUserStatsForGame`, AppID `730`): Total Kills, Total Deaths, calcul automat pentru ADR (Damage mediu pe runda) si Headshot % (pentru profilurile Steam care au setarea Game Details pe Public).
+Securitate: Cheia de acces nu este salvata in codul sursa de pe GitHub, ci este configurata securizat prin variabila de mediu `STEAM_API_KEY` (in sectiunea Environment pe Render).

@@ -136,6 +136,16 @@
                     <button onclick="addPlayer()" class="cs-btn w-full py-2.5 rounded">Salveaza Jucator</button>
                 </div>
 
+<!-- IMPORT DIRECT DIN STEAM API -->
+            <div class="cs-card p-6 rounded-xl space-y-3 border border-blue-500/40">
+                <h3 class="text-lg font-bold text-blue-400">Importa Jucator direct din Steam Web API</h3>
+                <p class="text-xs text-gray-400">Introdu un SteamID64 real (ex: 76561198034202275) pentru a prelua automat Nickname-ul si statisticile CS2 de pe Steam.</p>
+                <div class="flex gap-3">
+                    <input id="steam-import-id" type="text" placeholder="SteamID64 (17 cifre)" class="w-full p-2.5 rounded bg-[#0b0f19] border border-gray-700 text-white">
+                    <button onclick="importFromSteam()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded whitespace-nowrap">Importa din Steam</button>
+                </div>
+            </div>
+
                 <!-- Formular Adaugare Statistica Meci -->
                 <div class="cs-card p-6 rounded-xl space-y-3">
                     <h3 class="text-lg font-bold text-white">2. Adauga Statistica Meci (POST /stats)</h3>
@@ -489,6 +499,32 @@
             if (!res.ok) {
                 msg.className = "text-center font-bold text-sm text-red-400";
                 msg.innerText = data.detail || "Eroare! Doar Admin poate sterge botii.";
+            } else {
+                msg.className = "text-center font-bold text-sm text-emerald-400";
+                msg.innerText = data.message;
+                loadAllData();
+            }
+        }
+
+        async function importFromSteam() {
+            const steamId = document.getElementById('steam-import-id').value.trim();
+            const msg = document.getElementById('admin-msg');
+            if (!steamId) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = "Introdu un SteamID64 valid!";
+                return;
+            }
+            msg.className = "text-center font-bold text-sm text-blue-400";
+            msg.innerText = "Se preiau datele de pe serverele Steam...";
+
+            const res = await fetch(`/players/import-steam/${steamId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                msg.className = "text-center font-bold text-sm text-red-400";
+                msg.innerText = data.detail || "Eroare la importul din Steam.";
             } else {
                 msg.className = "text-center font-bold text-sm text-emerald-400";
                 msg.innerText = data.message;

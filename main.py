@@ -547,3 +547,98 @@ def clear_generated_bots(
     deleted_count = db.query(models.Player).filter(models.Player.id.in_(bot_ids)).delete(synchronize_session=False)
     db.commit()
     return {"message": f"Au fost stersi {deleted_count} boti si toate statisticile lor!"}
+
+# =====================================================================
+# 8. INTEGRARE STEAM WEB API (IMPORT JUCATOR DIRECT DIN STEAM)
+# =====================================================================
+import os
+import json
+import urllib.request
+import urllib.error
+
+STEAM_API_KEY = os.getenv("STEAM_API_KEY", "PUNE_CHEIA_TA_AICI_DOAR_LOCAL")
+
+@app.post("/players/import-steam/{steam_id}", tags=["3. Players CRUD"])
+def import_player_from_steam(
+    steam_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_roles(["Admin", "Premium"]))
+):
+    """Preia nickname, avatar si statistici CS2 direct din Steam Web API."""
+    if not STEAM_API_KEY or STEAM_API_KEY == "PUNE_CHEIA_TA_AICI_DOAR_LOCAL":
+        raise HTTPException(status_code=400, detail="Lipseste STEAM_API_KEY! Configureaza cheia in server.")
+
+    # 1. Cerem datele de profil (Nickname + Avatar)
+    summary_url = f"https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key={STEAM_API_KEY}&steamids={steam_id}"
+    try:
+        with urllib.request.urlopen(summary_url, timeout=10) as resp:
+            summary_data = json.loads(resp.read().decode())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Eroare comunicare cu Steam API: {str(e)}")
+
+    players_list = summary_data.get("response", {}).get("players", [])
+    if not players_list:
+        raise HTTPException(status_code=404, detail="Nu a fost gasit niciun cont Steam cu acest SteamID64.")
+
+    steam_user = players_list[0]
+    nickname = steam_user.get("personaname", f"Steam_{steam_id[-4:]}")
+    avatar_url = steam_user.get("avatarfull", "")
+
+    # Verificam daca jucatorul exista deja in baza de date
+    db_player = db.query(models.Player).filter(models.Player.steam_id == steam_id).first()
+    if not db_player:
+        db_player = models.Player(steam_id=steam_id, nickname=nickname, avatar_url=avatar_url)
+        db.add(db_player)
+        db.commit()
+        db.refresh(db_player)
+    else:
+        db_player.nickname = nickname
+        db_player.avatar_url = avatar_url
+        db.commit()
+
+    # 2. Cerem statisticile de CS2 (AppID 730) - functioneaza doar daca profilul are Game Details pe Public
+    stats_msg = "Profil importat! (Statisticile CS2 sunt private pe Steam)."
+    stats_url = f"https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/?appid=730&key={STEAM_API_KEY}&steamid={steam_id}"
+    try:
+        with urllib.request.urlopen(stats_url, timeout=10) as resp:
+            stats_data = json.loads(resp.read().decode())
+            raw_stats = {s["name"]: s["value"] for s in stats_data.get("playerstats", {}).get("stats", [])}
+
+            total_kills = raw_stats.get("total_kills", 0)
+            total_deaths = raw_stats.get("total_deaths", 1)
+            total_hs = raw_stats.get("total_kills_headshot", 0)
+            total_dmg = raw_stats.get("total_damage_done", 0)
+            total_rounds = raw_stats.get("total_rounds_played", 1)
+
+            hs_pct = round((total_hs / total_kills) * 100, 1) if total_kills > 0 else 0.0
+            adr = round(total_dmg / total_rounds, 1) if total_rounds > 0 else 0.0
+
+            match = db.query(models.Match).first()
+            if match and total_kills > 0:
+                db_stat = models.PlayerMatchStats(
+                    player_id=db_player.id,
+                    match_id=match.id,
+                    kills=total_kills,
+                    deaths=total_deaths,
+                    assists=0,
+                    adr=min(adr, 500.0),
+                    headshot_percentage=min(hs_pct, 100.0)
+                )
+                db.add(db_stat)
+                db.commit()
+                stats_msg = f"Profil + statistici CS2 importate (Kills: {total_kills}, ADR: {adr}, HS%: {hs_pct}%)!"
+    except urllib.error.HTTPError:
+        # 403 Forbidden inseamna ca profilul Steam are statisticile pe Privat
+        pass
+    except Exception:
+        pass
+
+    return {
+        "message": stats_msg,
+        "player": {
+            "id": db_player.id,
+            "nickname": db_player.nickname,
+            "steam_id": db_player.steam_id,
+            "avatar_url": db_player.avatar_url
+        }
+    }
